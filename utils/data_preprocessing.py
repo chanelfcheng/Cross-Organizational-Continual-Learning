@@ -9,12 +9,7 @@ from imblearn.over_sampling import RandomOverSampler
 from imblearn.under_sampling import RandomUnderSampler
 from tqdm import tqdm
 
-from datasets import CLASSES
 from utils.save_figures import save_feature_table, save_class_hist
-
-# Encoder for benign/attack labels
-le = LabelEncoder()
-le.fit(CLASSES)  # Known labels
 
 # Encoder for protocol feature
 ohe1 = OneHotEncoder(sparse=False)
@@ -153,8 +148,7 @@ def remove_invalid(features_np, labels_lst):
 
 def resample_data(dset, features, labels):
     """
-    Resamples the data by reducing the largest class and augmenting the minority
-    classes. The largest class is randomly undersampled to 2x greater than the
+    Resamples the data to reduce class imbalance. The largest class is randomly undersampled to 2x greater than the
     next largest class. The minority classes are randomly oversampled to 20% of
     the largest class, after undersampling.
     :param dset: The name of the dataset

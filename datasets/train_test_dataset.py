@@ -7,17 +7,19 @@ import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import TensorDataset
 from utils.data_preprocessing import process_features, remove_invalid, resample_data
-from sklearn.preprocessing import RobustScaler
+from sklearn.preprocessing import RobustScaler, LabelEncoder
+
+from datasets import PKL_PATH
 
 class TrainTestDataset():
     """
     Dataset for train test setting used to evaluate model training and testing
     on two datasets w/o transfer or continual learning
     """
-    def __init__(self, train_set, test_set, train_path, test_path, train_pkl_path, test_pkl_path, include_categorical):
+    def __init__(self, train_set, train_path, test_set, test_path, include_categorical):
         # Load in train and test sets
-        self.features_train, self.labels_train = load_data(train_set + '-train', train_path, train_pkl_path, include_categorical, resample=True)
-        self.features_test, self.labels_test = load_data(test_set + '-test', test_path, test_pkl_path, include_categorical, resample=False)
+        self.features_train, self.labels_train = load_data(train_set + '-train', train_path, include_categorical, resample=True)
+        self.features_test, self.labels_test = load_data(test_set + '-test', test_path, include_categorical, resample=False)
 
         # Remove classes uncommon between train and test sets
         train_idx = [i for i, x in enumerate(self.labels_train) if x in self.labels_test]
@@ -28,21 +30,21 @@ class TrainTestDataset():
         self.labels_test = np.take(self.labels_test, test_idx, axis=0).tolist()
         
         # Save to pickle files
-        if not os.path.exists(train_pkl_path):
-            with open(train_pkl_path, 'wb') as file:
+        if not os.path.exists(PKL_PATH + train_set + '-train.pkl'):
+            with open(PKL_PATH + train_set + '-train.pkl', 'wb') as file:
                 pickle.dump((self.features_train, self.labels_train), file)
 
-        if not os.path.exists(test_pkl_path):
-            with open(test_pkl_path, 'wb') as file:
+        if not os.path.exists(PKL_PATH + test_set + '-test.pkl'):
+            with open(PKL_PATH + train_set + '-train.pkl', 'wb') as file:
                 pickle.dump((self.features_test, self.labels_test), file)
 
-    def get_dataset(self, model='mlp'):
-        # Normalize train and test data
+    def get_pytorch_dataset(self, model='mlp'):
+        # Fit scaler to train features and scale the train and test features
         scale = RobustScaler(quantile_range=(5,95)).fit(self.features_train)
         features_train = scale.transform(self.features_train)
         features_test = scale.transform(self.features_test)
 
-        # Create pytorch datasets for data only
+        # Create pytorch tensors containing features only
         features_train = torch.tensor(features_train)
         features_test = torch.tensor(features_test)
 
@@ -53,40 +55,28 @@ class TrainTestDataset():
             features_train.shape, features_test.shape
 
         # Label encoding
-        label_encoding = {}
-        value = 0
-        for label in labels_test:
-            if label not in label_encoding:
-                label_encoding[label] = value
-                value += 1
-        
-        labels_idx_train = []
-        for i in range(len(labels_train)):
-            label = labels_train[i]
-            value = label_encoding[label]
-            labels_idx_train.append(value)
+        le = LabelEncoder()
+        le.fit(self.labels_train)
+        le_train = le.transform(self.labels_train)
+        le_test = le.transform(self.labels_test)
+        label_mapping = dict( zip( le.classes_, range( 0, len(le.classes_) ) ) )
 
-        labels_idx_test = []
-        for i in range(len(labels_test)):
-            label = labels_test[i]
-            value = label_encoding[label]
-            labels_idx_test.append(value)
-
-        labels_train = torch.tensor(labels_idx_train)
-        labels_test = torch.tensor(labels_idx_test)
-        classes = list(label_encoding.keys())
+        # Create pytorch tensors containing labels only
+        labels_train = torch.tensor(le_train)
+        labels_test = torch.tensor(le_test)
+        classes = list(label_mapping.keys())
 
         # Create pytorch datasets with labels
         dataset_train = TensorDataset(features_train, labels_train)
         dataset_test = TensorDataset(features_test, labels_test)
 
-        # Define classes
+        # Define dataset classes
         dataset_train.classes = classes
         dataset_test.classes = classes
 
         return dataset_train, dataset_test
 
-def load_data(dset, data_path, pkl_path, include_categorical=True, resample=True):
+def load_data(dset, data_path, include_categorical=True, resample=True):
     """
     Loads in dataset from a folder containing all the data files. Processes
     features, replaces invalid values, and concatenates all data files into a
@@ -103,8 +93,8 @@ def load_data(dset, data_path, pkl_path, include_categorical=True, resample=True
     all_invalid = 0
 
     # Check if pre-processed pickle file exists
-    if os.path.exists(pkl_path): 
-        with open(pkl_path, 'rb') as file:
+    if os.path.exists(PKL_PATH + dset + '.pkl'): 
+        with open(PKL_PATH + dset + '.pkl', 'rb') as file:
             all_features, all_labels = pickle.load(file)  # Load data from pickle file
     else:
         for file in list(glob.glob(f'{data_path}/*.csv')):
@@ -140,7 +130,7 @@ def load_data(dset, data_path, pkl_path, include_categorical=True, resample=True
         plt.tight_layout()
         plt.savefig('./figures/hist_' + dset + '.png')
 
-        # Resample data
+        # Resample training data
         if resample:
             all_features, all_labels = resample_data(dset, all_features, all_labels)
         

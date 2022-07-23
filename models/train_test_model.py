@@ -15,65 +15,37 @@ from tqdm import tqdm
 
 from mlp import MLP
 from eval_mlp import eval_model
-from load_data import load_pytorch_dataset
-from datasets import CIC_2018, USB_2021, CIC_PATH, USB_PATH, CIC_PKL_PATH, USB_PKL_PATH
-from datasets.transfer_dataset import TransferDataset
+from datasets import CIC_2018, USB_2021, CIC_PATH, USB_PATH
+from datasets.train_test_dataset import TrainTestDataset
 
 def train_mlp(args):
     """
     Sets up PyTorch objects and trains the MLP model.
-    :param name: The name of the run. Used for output folder
-    :param dset: The name of the dataset
-    :param data_path: The path to the folder containing all data files
-    :param pkl_path: The path to the pickle file containing the pre-processed data
-    :param include_categorical: Option to include or exclude categorical features
-    :param pretrained_path: The path to the pretrained model, if using transfer learning
-    :param batch_size: Size of the batch
-    :param eval_batch_size: Size of the evaluation batch
-    :param num_epochs: Number of training epochs
-    :param warmup_epochs: Number of warmup epochs for reduced learning rate
-    :param learning_rate: Base learning rate of model
-    :param min_lr: Minimum learning rate of model
-    :param warmup_lr: Warmup learning rate of model
-    :param transfer_learn: The transfer learning strategy to use
-    :param source_classes: Number of classes in the source dataset. -1 is used
-    if training without transfer learning
+    :param args: The command line arguments
     :return: None
     """
     name = args.arch + '-' + args.exp
     include_categorical = args.categorical
 
-    if args.exp == 'default-cic':
-        dset = CIC_2018
-        data_path = CIC_PATH
-        pkl_path = CIC_PKL_PATH
-        transfer_learn = 'none'
-        source_classes = -1
-    if args.exp == 'default-usb':
-        dset = USB_2021
-        data_path = USB_PATH
-        pkl_path = USB_PKL_PATH
-        transfer_learn = 'none'
-        source_classes = -1
-    if args.exp == 'transfer-cic-usb':
-        dset = USB_2021
-        data_path = USB_PATH
-        pkl_path = USB_PKL_PATH
+    if args.exp == 'train-test-cic-usb':
+        train_set = CIC_2018
+        train_path = CIC_PATH
+        test_set = USB_2021
+        test_path = USB_PATH
         transfer_learn = 'freeze-feature'
-        source_classes = 5
-    if args.exp == 'transfer-usb-cic':
-        dset = CIC_2018
-        data_path = CIC_PATH
-        pkl_path = CIC_PKL_PATH
+    if args.exp == 'train-test-usb-cic':
+        train_set = USB_2021
+        train_path = USB_PATH
+        test_set = CIC_2018
+        test_path = CIC_PATH
         transfer_learn = 'freeze-feature'
-        source_classes = 5
     
-    transfer_dataset = TransferDataset(dset, data_path, pkl_path, include_categorical)
+    ttd = TrainTestDataset(train_set, train_path, test_set, test_path, include_categorical)
     train = 'train'
     test = 'test'
 
     # Load dataset
-    dataset_train, dataset_test = transfer_dataset.get_dataset(dset, data_path, pkl_path, include_categorical, model=args.arch)
+    dataset_train, dataset_test = ttd.get_pytorch_dataset(model=args.arch)
     datasets = {train: dataset_train, test: dataset_test}
 
     samplers = {}
@@ -93,21 +65,11 @@ def train_mlp(args):
     print(device)
 
     # Initialize model
-    model = MLP(88 if include_categorical else 76, source_classes if transfer_learn != 'none' else num_classes)
+    model = MLP(88 if include_categorical else 76, num_classes)
     print(model)
 
-    # Transfer learning
-    if transfer_learn != 'none':
-        path = args.pretrained_path
-        model.load_state_dict(torch.load(path))
-        model.fc = nn.Linear(model.num_out_features, num_classes)
-
-    if transfer_learn == 'none':
-        for param in model.parameters():
-            param.requires_grad = True
-    elif transfer_learn == 'freeze-feature':
-        for param in model.fc.parameters():
-            param.requires_grad = True
+    for param in model.parameters():
+        param.requires_grad = True
 
     model = model.to(device)
 
@@ -228,7 +190,7 @@ def train_model(name, model, criterion, optimizer, scheduler, dataloaders, devic
                 if phase == train and eval_batch_freq > 0:
                     if (idx + 1) % eval_batch_freq == 0:
                         # Evaluate the model every set number of batches
-                        model_f1, model_acc, report = eval_model(name, model, dataloaders[test], device, out_path=out_dir)
+                        model_f1, model_acc = eval_model(name, model, dataloaders[test], device, out_path=out_dir)
                         validation_accuracies.append(model_acc)
                         if model_f1 > best_f1:
                             best_f1 = model_f1
@@ -294,14 +256,12 @@ def main():
     parser.add_argument('--arch', type=str, required=True,
     choices=['mlp', 'cnn'], help='The model architecture')
     parser.add_argument('--exp', type=str, required=True,
-    choices=['default-cic', 'default-usb', 'transfer-cic-usb',
-    'transfer-usb-cic'], help='The experimental setup for transfer learning')
+    choices=['train-test-cic-usb', 'train-test-usb-cic'], help='The experimental setup for transfer learning')
     parser.add_argument('--categorical', action='store_true', help='Option to include or not include categorical features in the model')
     parser.add_argument('--n-epochs', type=int, default=10, help='Number of epochs to train')
     parser.add_argument('--batch-size', type=int, default=32, help='Number of samples per training batch')
     parser.add_argument('--lr', type=float, default=1e-5, help='Learning rate during training')
     parser.add_argument('--warmup-lr', type=float, default=1e-5, help='Learning rate during warmup')
-    parser.add_argument('--pretrained-path', type=str, default='', help='Path to the pretrained model to transfer weights from')
 
     args = parser.parse_args()
 
