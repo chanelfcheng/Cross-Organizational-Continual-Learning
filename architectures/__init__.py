@@ -1,0 +1,1 @@
+ARCHITECTURES = ['mlp', 'cnn']

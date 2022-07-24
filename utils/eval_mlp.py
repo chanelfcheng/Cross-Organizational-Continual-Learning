@@ -12,7 +12,7 @@ from sklearn.metrics import f1_score, accuracy_score, confusion_matrix, Confusio
 from torch.utils.data import RandomSampler
 from tqdm import tqdm
 
-from models.mlp import MLP
+from architectures.mlp import MLP
 from datasets import CIC_2018, USB_2021, get_pytorch_dataset
 from datasets.train_test_dataset import TrainTestDataset
 from datasets.transfer_dataset import TransferDataset
