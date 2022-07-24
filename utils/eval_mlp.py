@@ -3,6 +3,7 @@ import math
 import os
 import sys
 
+import pandas as pd
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
@@ -11,21 +12,23 @@ from sklearn.metrics import f1_score, accuracy_score, confusion_matrix, Confusio
 from torch.utils.data import RandomSampler
 from tqdm import tqdm
 
-import mlp
-from load_data import load_pytorch_dataset, CIC_2018, USB_2021
-from utils.save_figures import save_classification_report
+from models.mlp import MLP
+from datasets import CIC_2018, USB_2021, get_pytorch_dataset
+from datasets.train_test_dataset import TrainTestDataset
+from datasets.transfer_dataset import TransferDataset
+from utils.save_figures import save_table_html
 
-def eval(pretrained_path, include_categorical, args):
+def eval(args):
     """
     Setup the data objects to evaluate the specified MLP model
-    :param pretrained_path: Path to the pretrained model
     :param args: The command line arguments
     :return: None
     """
     batch_size = args.batch_size
+    include_categorical = args.categorical
 
     # Load dataset
-    _, eval_dataset = load_pytorch_dataset(dset=args.dset, data_path=args.data_path, pkl_path=args.pkl_path, include_categorical=True, model='mlp')
+    _, eval_dataset = get_pytorch_dataset(dset=args.dset, model='mlp')
     sampler = RandomSampler(eval_dataset)  # RandomSample for more balance for t-SNE
 
     dataloader = torch.utils.data.DataLoader(eval_dataset, batch_size=batch_size, sampler=sampler,
@@ -36,15 +39,14 @@ def eval(pretrained_path, include_categorical, args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     # Initialize Model
-    model = mlp.MLP(88 if include_categorical else 76, num_classes, embeddings=args.tsne)
+    model = MLP(88 if include_categorical else 76, num_classes, embeddings=args.tsne)
 
-    model.load_state_dict(torch.load(pretrained_path))
+    model.load_state_dict(torch.load(args.pretrained_path))
 
     model = model.to(device)
 
     out_path = os.path.join('out', args.name)
     eval_model(model, dataloader, device, out_path, tsne=args.tsne, tsne_percent=args.tsne_percent)
-
 
 def eval_model(name, model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01):
     """
@@ -129,19 +131,18 @@ def eval_model(name, model, dataloader, device, out_path=None, tsne=False, tsne_
         plt.clf()
 
     print('Top-1 Acc: {:.4f} F1 Score: {:.4f}'.format(top1_acc, val_f1_score))
-    log_str = classification_report(all_labels, all_preds, target_names=dataloader.dataset.classes, digits=4)
-    print(log_str)
-    return val_f1_score, top1_acc, log_str
+
+    cr_dict = classification_report(all_labels, all_preds, target_names=dataloader.dataset.classes, digits=4, output_dict=True)
+    save_table_html(pd.DataFrame(cr_dict))
+    
+    return val_f1_score, top1_acc
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument('--name', type=str, default='debug', help='Unique name used for saving output files')
-    parser.add_argument('--model-path', type=str, required=True, help='Path to the pretrained weights')
-    parser.add_argument('--data-path', type=str, required=True, help='Path to the dataset files')
+    parser.add_argument('--pretrained-path', type=str, required=True, help='Path to the pretrained weights')
     parser.add_argument('--dset', required=True, choices=[CIC_2018, USB_2021], help='Specify which dataset to use for'
                                                                                     'evaluation')
-    parser.add_argument('--pkl-path', type=str, help='Path to store pickle files.  Saves time by storing preprocessed '
-                                                     'data')
+    parser.add_argument('--categorical', default=True, help='Option to include or not include categorical features in the model')
     parser.add_argument('--batch-size', type=int, required=True, help='The batch size to use for evaluation')
     parser.add_argument('--tsne', action='store_true', help='If set generates TSNE plots using subset of data.'
                                                             'Other metrics are not valid')
@@ -149,12 +150,12 @@ def main():
                                                              'dataset')
     args = parser.parse_args()
 
-    path = args.model_path
+    path = args.pretrained_path
     if not os.path.exists(path):
-        print('Path is invalid', file=sys.stderr)
+        print('Pretrained path is invalid.', file=sys.stderr)
         exit(1)
 
-    eval(path, True, args)
+    eval(args)
     print('Done')
 
 
