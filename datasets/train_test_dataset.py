@@ -6,9 +6,9 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import torch
 from torch.utils.data import TensorDataset
-from utils.data_preprocessing import process_features, remove_invalid, resample_data
 from sklearn.preprocessing import RobustScaler, LabelEncoder
 
+from utils.data_preprocessing import process_features, remove_invalid, resample_data
 from datasets import PKL_PATH
 
 class TrainTestDataset():
@@ -16,29 +16,12 @@ class TrainTestDataset():
     Dataset for train test setting used to evaluate model training and testing
     on two datasets w/o transfer or continual learning
     """
-    def __init__(self, train_set, train_path, test_set, test_path, include_categorical):
+    def __init__(self, train_set, train_classes, train_path, test_set, test_classes, test_path, include_categorical=True):
         # Load in train and test sets
-        self.features_train, self.labels_train = load_data(train_set + '-train', train_path, include_categorical, resample=True)
-        self.features_test, self.labels_test = load_data(test_set + '-test', test_path, include_categorical, resample=False)
+        self.features_train, self.labels_train = load_data(train_set + '-train', train_path, train_classes, test_classes, include_categorical, training=True)
+        self.features_test, self.labels_test = load_data(test_set + '-test', test_path, train_classes, test_classes, include_categorical, training=False)
 
-        # Remove classes uncommon between train and test sets
-        train_idx = [i for i, x in enumerate(self.labels_train) if x in self.labels_test]
-        test_idx = [i for i, x in enumerate(self.labels_test) if x in self.labels_train]
-        self.features_train = np.take(self.features_train, train_idx, axis=0)
-        self.labels_train = np.take(self.labels_train, train_idx, axis=0).tolist()
-        self.features_test = np.take(self.features_test, test_idx, axis=0)
-        self.labels_test = np.take(self.labels_test, test_idx, axis=0).tolist()
-        
-        # Save to pickle files
-        if not os.path.exists(PKL_PATH + train_set + '-train.pkl'):
-            with open(PKL_PATH + train_set + '-train.pkl', 'wb') as file:
-                pickle.dump((self.features_train, self.labels_train), file)
-
-        if not os.path.exists(PKL_PATH + test_set + '-test.pkl'):
-            with open(PKL_PATH + train_set + '-train.pkl', 'wb') as file:
-                pickle.dump((self.features_test, self.labels_test), file)
-
-    def get_pytorch_dataset(self, model='mlp'):
+    def get_pytorch_dataset(self, arch='mlp'):
         # Fit scaler to train features and scale the train and test features
         scale = RobustScaler(quantile_range=(5,95)).fit(self.features_train)
         features_train = scale.transform(self.features_train)
@@ -49,7 +32,7 @@ class TrainTestDataset():
         features_test = torch.tensor(features_test)
 
         # Reshape input features for CNN
-        if model == 'cnn':
+        if arch == 'cnn':
             features_train = features_train.reshape(len(features_train), features_train.shape[1], 1)
             features_test = features_test.reshape(len(features_test), features_test.shape[1], 1)
             features_train.shape, features_test.shape
@@ -76,34 +59,45 @@ class TrainTestDataset():
 
         return dataset_train, dataset_test
 
-def load_data(dset, data_path, include_categorical=True, resample=True):
+def load_data(dset, data_path, train_classes, test_classes, include_categorical=True, training=True):
     """
     Loads in dataset from a folder containing all the data files. Processes
     features, replaces invalid values, and concatenates all data files into a
     single dataset. Splits dataset into train (.80) and test (.20) sets
     :param dset: name of the dataset
     :param data_path: path to the folder containing the data files
-    :param pkl_path: path to pickle file for saving pre-processed data
-    :param include_categorical: option to include or exclude categorical features
+    :param include_categorical: option to include categorical features
+    :param training: whether the dataset will be used for training or not
     :return: the training features, training labels, test features, and test labels
     """
     # Define variables to store all features, labels, and invalid count after concatenation
-    all_features = None
+    all_features = np.array([])
     all_labels = []
     all_invalid = 0
 
     # Check if pre-processed pickle file exists
-    if os.path.exists(PKL_PATH + dset + '.pkl'): 
-        with open(PKL_PATH + dset + '.pkl', 'rb') as file:
+    if os.path.exists(os.path.join(PKL_PATH, f'{dset}.pkl')): 
+        with open(os.path.join(PKL_PATH, f'{dset}.pkl'), 'rb') as file:
             all_features, all_labels = pickle.load(file)  # Load data from pickle file
     else:
-        for file in list(glob.glob(f'{data_path}/*.csv')):
+        for file in list(glob.glob(os.path.join(f'{data_path}', '*.csv'))):
             print('Loading ', file, '...')
             reader = pd.read_csv(file, dtype=str, chunksize=10**6, skipinitialspace=True)  # Read in data from csv file
 
             for df in reader:
+                
+                # Randomly sample 80% of the train set or 20% of the test set
+                if training:
+                    df = df.sample(frac=0.8)
+                else:
+                    df = df.sample(frac=0.2)
+
                 # Process the features and labels
                 features, labels = process_features(dset, df, include_categorical)
+
+                # Only keep samples with classes found in both train and test sets
+                features = features.loc[ labels.isin( list( set( train_classes ) & set( test_classes ) ) ) ]
+                labels = labels.loc[ labels.isin( list( set( train_classes ) & set( test_classes ) ) ) ]
 
                 # Convert dataframe to numpy array for processing
                 data_np = np.array(features.to_numpy(), dtype=float)
@@ -112,7 +106,7 @@ def load_data(dset, data_path, include_categorical=True, resample=True):
                 data_np, labels_lst, num_invalid = remove_invalid(data_np, labels_lst)  # Clean data of invalid values
 
                 # Combine all data, labels, and number of invalid values
-                if all_features is None:
+                if all_features.size == 0:
                     all_features = data_np  # If no data yet, set all data to current data
                 else:
                     all_features = np.concatenate((all_features, data_np))  # Else, concatenate data
@@ -128,10 +122,14 @@ def load_data(dset, data_path, include_categorical=True, resample=True):
         # Save histogram of cleaned data
         axs = pd.DataFrame(all_features, columns=features.columns.values.tolist()).hist(figsize=(30,30))
         plt.tight_layout()
-        plt.savefig('./figures/hist_' + dset + '.png')
+        plt.savefig(os.path.join('./figures/', f'hist_{dset}.png'))
 
-        # Resample training data
-        if resample:
+        # Resample training data only
+        if training:
             all_features, all_labels = resample_data(dset, all_features, all_labels)
+
+        # Save to pickle files
+        with open(os.path.join(PKL_PATH, f'{dset}.pkl'), 'wb') as file:
+            pickle.dump((all_features, all_labels), file)
         
     return all_features, all_labels

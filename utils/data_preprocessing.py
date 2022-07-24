@@ -9,7 +9,7 @@ from imblearn.over_sampling import RandomOverSampler
 from imblearn.under_sampling import RandomUnderSampler
 from tqdm import tqdm
 
-from utils.save_figures import save_feature_table, save_class_hist
+from utils.save_figures import save_class_hist
 
 # Encoder for protocol feature
 ohe1 = OneHotEncoder(sparse=False)
@@ -76,9 +76,6 @@ def process_features(dset, df, include_categorical):
         features = features.join(ohe_dport)
     else:
         features = features.drop(['Protocol', 'Dst Port'], axis=1)
-
-    # Save first three rows of table containing categorical features as a figure
-    save_feature_table('encoded_categorical_' + dset, features, 0, 3, -12, None)
 
     return features, labels
 

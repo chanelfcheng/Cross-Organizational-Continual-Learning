@@ -1,6 +1,7 @@
 *.csv
-*.png
 *.pkl
+*.png
+*.html
 *.txt
 *.pth
 test.py

@@ -3,22 +3,19 @@ import math
 import os
 import sys
 
-import pandas as pd
 import numpy as np
 import torch
 from matplotlib import pyplot as plt
 from sklearn.manifold import TSNE
 from sklearn.metrics import f1_score, accuracy_score, confusion_matrix, ConfusionMatrixDisplay, classification_report
-from torch.utils.data import RandomSampler
 from tqdm import tqdm
+import torch
+from torch.utils.data import RandomSampler
 
 from architectures.mlp import MLP
-from datasets import CIC_2018, USB_2021, get_pytorch_dataset
-from datasets.train_test_dataset import TrainTestDataset
-from datasets.transfer_dataset import TransferDataset
-from utils.save_figures import save_table_html
+from datasets import get_pytorch_dataset
 
-def eval(args):
+def eval_mlp(args):
     """
     Setup the data objects to evaluate the specified MLP model
     :param args: The command line arguments
@@ -45,10 +42,10 @@ def eval(args):
 
     model = model.to(device)
 
-    out_path = os.path.join('out', args.name)
-    eval_model(model, dataloader, device, out_path, tsne=args.tsne, tsne_percent=args.tsne_percent)
+    out_path = os.path.abspath(args.pretrained_path)
+    evaluate(model, dataloader, device, out_path, tsne=args.tsne, tsne_percent=args.tsne_percent)
 
-def eval_model(name, model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01):
+def evaluate(model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01):
     """
     Evaluate the given model
     :param model: The MLP model
@@ -97,7 +94,7 @@ def eval_model(name, model, dataloader, device, out_path=None, tsne=False, tsne_
     all_labels = all_labels.detach().cpu().numpy()
     all_preds = all_preds.detach().cpu().numpy()
     top1_acc = accuracy_score(all_labels, all_preds)
-    val_f1_score = f1_score(all_labels, all_preds,
+    ave_f1_score = f1_score(all_labels, all_preds,
                             average='macro')
 
     if out_path is not None:
@@ -130,20 +127,16 @@ def eval_model(name, model, dataloader, device, out_path=None, tsne=False, tsne_
         plt.savefig(os.path.join(out_path, 'tsne.png'))
         plt.clf()
 
-    print('Top-1 Acc: {:.4f} F1 Score: {:.4f}'.format(top1_acc, val_f1_score))
-
-    cr_dict = classification_report(all_labels, all_preds, target_names=dataloader.dataset.classes, digits=4, output_dict=True)
-    save_table_html(pd.DataFrame(cr_dict))
+    print('\n', classification_report(all_labels, all_preds, target_names=dataloader.dataset.classes, digits=4))
     
-    return val_f1_score, top1_acc
+    return ave_f1_score, top1_acc
 
 def main():
     parser = argparse.ArgumentParser()
+    parser.add_argument('--arch', type=str, required=True, help='The model architecture')
     parser.add_argument('--pretrained-path', type=str, required=True, help='Path to the pretrained weights')
-    parser.add_argument('--dset', required=True, choices=[CIC_2018, USB_2021], help='Specify which dataset to use for'
-                                                                                    'evaluation')
     parser.add_argument('--categorical', default=True, help='Option to include or not include categorical features in the model')
-    parser.add_argument('--batch-size', type=int, required=True, help='The batch size to use for evaluation')
+    parser.add_argument('--batch-size', type=int, default=1028, help='The batch size to use for evaluation')
     parser.add_argument('--tsne', action='store_true', help='If set generates TSNE plots using subset of data.'
                                                             'Other metrics are not valid')
     parser.add_argument('--tsne-percent', default=0.01, help='To speed up TSNE, only run on a small portion of the '
@@ -155,7 +148,9 @@ def main():
         print('Pretrained path is invalid.', file=sys.stderr)
         exit(1)
 
-    eval(args)
+    if args.arch == 'mlp':
+        eval_mlp(args)
+    
     print('Done')
 
 
