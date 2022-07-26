@@ -10,7 +10,6 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler, LabelEncoder
 
 from utils.data_preprocessing import process_features, remove_invalid, resample_data
-
 from datasets import PKL_PATH
 
 class TransferDataset():
@@ -22,20 +21,20 @@ class TransferDataset():
         self.a_features_train, \
             self.a_features_test, \
                 self.a_labels_train, \
-                    self.a_labels_test = load_data(a_set + '-a', a_path, include_categorical)
+                    self.a_labels_test = load_data(a_set + '-transfer', a_path, include_categorical)
 
         self.b_features_train, \
             self.b_features_test, \
                 self.b_labels_train, \
-                    self.b_labels_test = load_data(b_set + '-b', b_path, include_categorical)
+                    self.b_labels_test = load_data(b_set + '-transfer', b_path, include_categorical)
 
     def get_pytorch_dataset_a(self, arch='mlp'):
-        # Normalize train and test data
+        # Fit scaler to train features and scale the train and test features
         scale = RobustScaler(quantile_range=(5,95)).fit(self.a_features_train)
         features_train = scale.transform(self.a_features_train)
         features_test = scale.transform(self.a_features_test)
 
-        # Create pytorch datasets for data only
+        # Create pytorch tensors containing features only
         features_train = torch.tensor(features_train)
         features_test = torch.tensor(features_test)
 
@@ -61,19 +60,19 @@ class TransferDataset():
         dataset_train = TensorDataset(features_train, labels_train)
         dataset_test = TensorDataset(features_test, labels_test)
 
-        # Define classes
+        # Define dataset classes
         dataset_train.classes = classes
         dataset_test.classes = classes
 
         return dataset_train, dataset_test
     
     def get_pytorch_dataset_b(self, arch='mlp'):
-        # Normalize train and test data
+        # Fit scaler to train features and scale the train and test features
         scale = RobustScaler(quantile_range=(5,95)).fit(self.b_features_train)
         features_train = scale.transform(self.b_features_train)
         features_test = scale.transform(self.b_features_test)
 
-        # Create pytorch datasets for data only
+        # Create pytorch tensors containing features only
         features_train = torch.tensor(features_train)
         features_test = torch.tensor(features_test)
 
@@ -99,7 +98,7 @@ class TransferDataset():
         dataset_train = TensorDataset(features_train, labels_train)
         dataset_test = TensorDataset(features_test, labels_test)
 
-        # Define classes
+        # Define dataset classes
         dataset_train.classes = classes
         dataset_test.classes = classes
 
@@ -121,7 +120,7 @@ def load_data(dset, data_path, include_categorical=True):
     all_labels = []
     all_invalid = 0
 
-    if dset == '':
+    if data_path == '':
         return np.array([]), np.array([]), np.array([]), np.array([])
 
     # Check if pre-processed pickle file exists
@@ -129,8 +128,8 @@ def load_data(dset, data_path, include_categorical=True):
         with open(os.path.join(PKL_PATH, f'{dset}.pkl'), 'rb') as file:
             features_train, features_test, labels_train, labels_test = pickle.load(file)  # Load data from pickle file
     else:
-        for file in list(glob.glob(os.path.join(f'{data_path}, *.csv'))):
-            print('Loading ', file, '...')
+        for file in list(glob.glob(os.path.join(f'{data_path}', '*.csv'))):
+            print('Loading', file, '...')
             reader = pd.read_csv(file, dtype=str, chunksize=10**6, skipinitialspace=True)  # Read in data from csv file
 
             for df in reader:
@@ -153,7 +152,7 @@ def load_data(dset, data_path, include_categorical=True):
 
         # Print total number of invalid values dropped, total number of data
         # values, and total percentage of invalid data
-        print('Total Number of invalid values: %d' % all_invalid)
+        print('\nTotal Number of invalid values: %d' % all_invalid)
         print('Total Data values: %d' % len(all_labels))
         print('Invalid data: %.2f%%' % (all_invalid / float(all_features.size) * 100))
 
@@ -166,6 +165,7 @@ def load_data(dset, data_path, include_categorical=True):
         features_train, features_test, labels_train, labels_test = train_test_split(all_features, all_labels, test_size=0.2)
 
         # Resample training data
+        print('\nResampling training data...')
         features_train, labels_train = resample_data(dset, features_train, labels_train)
         
         # Save to pickle file

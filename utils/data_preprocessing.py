@@ -9,7 +9,7 @@ from imblearn.over_sampling import RandomOverSampler
 from imblearn.under_sampling import RandomUnderSampler
 from tqdm import tqdm
 
-from utils.save_figures import save_class_hist
+from utils.figures import save_class_hist
 
 # Encoder for protocol feature
 ohe1 = OneHotEncoder(sparse=False)
@@ -28,7 +28,7 @@ def process_features(dset, df, include_categorical):
     :param include_categorical: Option to include or exclude categorical features
     :return: The features and their corresponding labels 
     """
-    print('Processing features...')
+    print('\nProcessing features...')
     rename_labels(df)
 
     attack = df.loc[df['Label'].str.contains('hulk|slowloris|slowhttptest|tcpflood|goldeneye', case=False)].copy()  # Get attack types
@@ -129,6 +129,7 @@ def remove_invalid(features_np, labels_lst):
     num_invalid = 0
     remove_idx = []
 
+    print()
     for flow_idx in tqdm(range(features_np.shape[0]), file=sys.stdout, desc='Cleaning data array...'):
         for feature_idx in range(features_np.shape[1]):
             data_val = features_np[flow_idx, feature_idx]
@@ -205,11 +206,12 @@ def resample_data(dset, features, labels):
     #         class_samples[label] += 1
     # save_class_hist(class_samples, 'after_dropping_' + name)
 
-    # Oversample minority classes up to 20% of largest class (after undersampling)
+    # Oversample smaller classes up to 50% of largest class (after undersampling)
     largest_num = max(class_samples.values())
     largest_class = max(class_samples, key=class_samples.get)
     target_dict = {}
-    target_num = round(largest_num * 0.20)
+    target_num = round(largest_num * 0.50)
+    print(f'Number of {largest_class} samples: ')
     print('Targeting %d samples for each minority class' % target_num)
     for label in class_samples.keys():
         if label == largest_class or class_samples[label] > target_num:
@@ -218,7 +220,6 @@ def resample_data(dset, features, labels):
             target_dict[label] = target_num
 
     oversampler = RandomOverSampler(sampling_strategy=target_dict)
-    start = time.time()
     features, labels = oversampler.fit_resample(features, labels)
     print('Finished Oversampling')
     class_samples = {}
@@ -228,7 +229,8 @@ def resample_data(dset, features, labels):
         else:
             class_samples[label] += 1
     save_class_hist(class_samples, 'after_oversampling_' + dset)
-    print('Total Data values: %d' % orig_samples)
+    print('Original samples: %d' % orig_samples)
+    print('Current samples: %d' % len(labels))
 
     return features, labels
 

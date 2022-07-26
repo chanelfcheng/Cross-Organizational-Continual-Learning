@@ -1,3 +1,5 @@
+from torch import nn
+
 # CNN
 class CNN(nn.Module):
     def __init__(self, in_features, out_classes):

@@ -1,19 +1,14 @@
 import argparse
-import math
 import os
 import sys
 
-import numpy as np
 import torch
-from matplotlib import pyplot as plt
-from sklearn.manifold import TSNE
-from sklearn.metrics import f1_score, accuracy_score, confusion_matrix, ConfusionMatrixDisplay, classification_report
-from tqdm import tqdm
 import torch
 from torch.utils.data import RandomSampler
 
 from architectures.mlp import MLP
 from datasets import get_pytorch_dataset
+from utils.model import eval_model
 
 def eval_mlp(args):
     """
@@ -43,93 +38,7 @@ def eval_mlp(args):
     model = model.to(device)
 
     out_path = os.path.abspath(args.pretrained_path)
-    evaluate(model, dataloader, device, out_path, tsne=args.tsne, tsne_percent=args.tsne_percent)
-
-def evaluate(model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01):
-    """
-    Evaluate the given model
-    :param model: The MLP model
-    :param dataloader: Dataloader for the evaluation data
-    :param device: string for the specified device to perform computation
-    :param out_path: Path to the output dir to save information
-    :param tsne: Boolean flag on whether to perform TSNE visualization
-    :param tsne_percent: The percentage of evaluation data to plot for TSNE
-    :return: The f1-score and accuracy
-    """
-    model.eval()  # Set model to evaluate mode
-    start_test = True
-
-    # Iterate over data.
-    if tsne:
-        max_iter = math.floor(len(dataloader) * tsne_percent)
-    else:
-        max_iter = len(dataloader) + 5
-    iterator = tqdm(dataloader, file=sys.stdout)
-    for idx, (inputs, labels) in enumerate(iterator):
-        inputs = inputs.to(device)
-        labels = labels.to(device)
-
-        if tsne:
-            outputs, feat_embeddings = model(inputs.float())
-        else:
-            outputs = model(inputs.float())
-        _, preds = torch.max(outputs, 1)
-
-        # statistics
-        if start_test:
-            all_preds = preds.float().cpu()
-            all_labels = labels.float()
-            if tsne:
-                embeddings = feat_embeddings.float().cpu().detach().numpy()
-            start_test = False
-        else:
-            all_preds = torch.cat((all_preds, preds.float().cpu()), 0)
-            all_labels = torch.cat((all_labels, labels.float()), 0)
-            if tsne:
-                embeddings = np.concatenate([embeddings, feat_embeddings.detach().cpu().numpy()], axis=0)
-
-        if idx > max_iter:
-            break
-
-    all_labels = all_labels.detach().cpu().numpy()
-    all_preds = all_preds.detach().cpu().numpy()
-    top1_acc = accuracy_score(all_labels, all_preds)
-    ave_f1_score = f1_score(all_labels, all_preds,
-                            average='macro')
-
-    if out_path is not None:
-        plt.clf()
-        cf_matrix = confusion_matrix(all_labels, all_preds)
-        cf_matrix = cf_matrix.astype('float') / cf_matrix.sum(axis=1)[:, np.newaxis]
-        acc = cf_matrix.diagonal() / cf_matrix.sum(axis=1) * 100
-        disp = ConfusionMatrixDisplay.from_predictions(all_labels, all_preds,
-                                                       display_labels=dataloader.dataset.classes, values_format='0.2f',
-                                                       normalize='true', xticks_rotation='vertical')
-        disp.plot(values_format='0.2f', xticks_rotation='vertical')
-        plt.title('CF acc=%.2f%%' % top1_acc)
-        # plt.tight_layout()
-        plt.savefig(os.path.join(out_path, 'cf.png'))
-        plt.clf()
-
-    if tsne:
-        tsne = TSNE(2, verbose=1)
-        tsne_proj = tsne.fit_transform(embeddings)
-
-        plt.clf()
-        fig, ax = plt.subplots(figsize=(8, 8))
-        num_categories = len(dataloader.dataset.classes)
-        for lab in range(num_categories):
-            indices = all_labels == lab
-            ax.scatter(tsne_proj[indices, 0], tsne_proj[indices, 1], label=dataloader.dataset.classes[lab],
-                       alpha=0.5)
-        ax.legend(fontsize='large', markerscale=2)
-        plt.title('TSNE acc=%.2f%%' % acc.mean())
-        plt.savefig(os.path.join(out_path, 'tsne.png'))
-        plt.clf()
-
-    print('\n', classification_report(all_labels, all_preds, target_names=dataloader.dataset.classes, digits=4))
-    
-    return ave_f1_score, top1_acc
+    eval_model(model, dataloader, device, out_path, tsne=args.tsne, tsne_percent=args.tsne_percent)
 
 def main():
     parser = argparse.ArgumentParser()

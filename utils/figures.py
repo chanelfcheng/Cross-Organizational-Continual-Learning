@@ -21,7 +21,7 @@ def save_class_hist(samples_dict: dict, name: str):
     plt.xlabel('Class Name')
     plt.xticks(rotation=90)
     plt.grid(True)
+    plt.rc('font', size=32)
     plt.tight_layout()
-    plt.rc('font', size=24)
     plt.savefig(os.path.join('./figures/', '%s.png' % name))  # TODO: Update to use specified output directory
-    plt.clf()
+    plt.close('all')
