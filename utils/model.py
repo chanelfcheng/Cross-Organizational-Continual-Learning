@@ -204,6 +204,7 @@ def eval_model(model, dataloader, device, out_path=None, tsne=False, tsne_percen
         max_iter = math.floor(len(dataloader) * tsne_percent)
     else:
         max_iter = len(dataloader) + 5
+    
     iterator = tqdm(dataloader, file=sys.stdout)
     for idx, (inputs, labels) in enumerate(iterator):
         inputs = inputs.to(device)
@@ -260,16 +261,16 @@ def eval_model(model, dataloader, device, out_path=None, tsne=False, tsne_percen
         plt.clf()
         fig, ax = plt.subplots(figsize=(8, 8))
         num_categories = len(dataloader.dataset.classes)
+        colors = ['tab:blue', 'tab:green', 'tab:red', 'tab:purple', 'tab:orange']
         for lab in range(num_categories):
             indices = all_labels == lab
-            ax.scatter(tsne_proj[indices, 0], tsne_proj[indices, 1], label=dataloader.dataset.classes[lab],
+            ax.scatter(tsne_proj[indices, 0], tsne_proj[indices, 1], label=dataloader.dataset.classes[lab], c=colors[lab],
                        alpha=0.5)
         ax.legend(fontsize='large', markerscale=2)
         plt.title('TSNE acc=%.2f%%' % acc.mean())
         plt.savefig(os.path.join(out_path, 'tsne.png'))
         plt.close('all')
-
-    report = classification_report(all_labels, all_preds, target_names=dataloader.dataset.classes, digits=4)
-    print('\n', report)
-    
-    return ave_f1_score, top1_acc, report
+    else:
+        report = classification_report(all_labels, all_preds, target_names=dataloader.dataset.classes, digits=4)
+        print('\n', report)
+        return ave_f1_score, top1_acc, report

@@ -10,7 +10,6 @@ from torch.utils.data import RandomSampler, SequentialSampler
 
 from architectures import ARCHITECTURES
 from architectures.mlp import MLP
-from eval_model import eval_model
 from datasets import CIC_2018, USB_2021, CIC_PATH, USB_PATH
 from datasets.transfer_dataset import TransferDataset
 from utils.model import train_model
