@@ -14,7 +14,7 @@ from sklearn.preprocessing import RobustScaler, LabelEncoder
 from datasets import PKL_PATH
 from utils.data_preprocessing import process_features, remove_invalid, resample_data
 
-class ContinualDataset():
+class ContinualDataset:
     """
     Dataset for continual learning setting used to evaluate learning from a continuous stream of data.
     """

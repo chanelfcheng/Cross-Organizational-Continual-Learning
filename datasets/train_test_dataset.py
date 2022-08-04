@@ -11,7 +11,7 @@ from sklearn.preprocessing import RobustScaler, LabelEncoder
 from utils.data_preprocessing import process_features, remove_invalid, resample_data
 from datasets import PKL_PATH
 
-class TrainTestDataset():
+class TrainTestDataset:
     """
     Dataset for train test setting used to evaluate model training and testing
     on two datasets w/o transfer or continual learning

@@ -12,7 +12,7 @@ from sklearn.preprocessing import RobustScaler, LabelEncoder
 from utils.data_preprocessing import process_features, remove_invalid, resample_data
 from datasets import PKL_PATH
 
-class TransferDataset():
+class TransferDataset:
     """
     Dataset for transfer learning setting used to evaluate feature freezing from
     one dataset to another

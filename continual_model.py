@@ -2,7 +2,10 @@ import torch.nn as nn
 from torch.optim import SGD
 import torch
 import torchvision
+from torch.nn import functional as F
 from argparse import Namespace
+
+from utils.buffer import Buffer
 
 class ContinualModel(nn.Module):
     """
@@ -41,3 +44,60 @@ class ContinualModel(nn.Module):
         :return: the value of the loss function
         """
         pass
+
+class Er(ContinualModel):
+    NAME = 'er'
+    COMPATIBILITY = ['class-il', 'domain-il', 'task-il', 'general-continual']
+
+    def __init__(self, backbone, loss, args, transform):
+        super(Er, self).__init__(backbone, loss, args, transform)
+        self.buffer = Buffer(self.args.buffer_size, self.device)
+
+    def observe(self, inputs, labels, not_aug_inputs):
+
+        real_batch_size = inputs.shape[0]
+
+        self.opt.zero_grad()
+        if not self.buffer.is_empty():
+            buf_inputs, buf_labels = self.buffer.get_data(
+                self.args.minibatch_size, transform=self.transform)
+            inputs = torch.cat((inputs, buf_inputs))
+            labels = torch.cat((labels, buf_labels))
+
+        outputs = self.net(inputs)
+        loss = self.loss(outputs, labels)
+        loss.backward()
+        self.opt.step()
+
+        self.buffer.add_data(examples=not_aug_inputs,
+                             labels=labels[:real_batch_size])
+
+        return loss.item()
+    
+
+class Der(ContinualModel):
+    NAME = 'der'
+    COMPATIBILITY = ['class-il', 'domain-il', 'task-il', 'general-continual']
+
+    def __init__(self, backbone, loss, args, transform):
+        super(Der, self).__init__(backbone, loss, args, transform)
+        self.buffer = Buffer(self.args.buffer_size, self.device)
+
+    def observe(self, inputs, labels, not_aug_inputs):
+
+        self.opt.zero_grad()
+
+        outputs = self.net(inputs)
+        loss = self.loss(outputs, labels)
+
+        if not self.buffer.is_empty():
+            buf_inputs, buf_logits = self.buffer.get_data(
+                self.args.minibatch_size, transform=self.transform)
+            buf_outputs = self.net(buf_inputs)
+            loss += self.args.alpha * F.mse_loss(buf_outputs, buf_logits)
+
+        loss.backward()
+        self.opt.step()
+        self.buffer.add_data(examples=not_aug_inputs, logits=outputs.data)
+
+        return loss.item()
