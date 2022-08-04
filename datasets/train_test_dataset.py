@@ -81,7 +81,7 @@ def load_data(dset, data_path, train_classes, test_classes, include_categorical=
             all_features, all_labels = pickle.load(file)  # Load data from pickle file
     else:
         for file in list(glob.glob(os.path.join(f'{data_path}', '*.csv'))):
-            print('Loading', file, '...')
+            print('\nLoading', file, '...')
             reader = pd.read_csv(file, dtype=str, chunksize=10**6, skipinitialspace=True)  # Read in data from csv file
 
             for df in reader:

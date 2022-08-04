@@ -1,15 +1,13 @@
 import os
 import sys
-import time
+
 import numpy as np
 import pandas as pd
-import plotly.figure_factory as ff
+import matplotlib.pyplot as plt
 from sklearn.preprocessing import LabelEncoder, OneHotEncoder
 from imblearn.over_sampling import RandomOverSampler
 from imblearn.under_sampling import RandomUnderSampler
 from tqdm import tqdm
-
-from utils.figures import save_class_hist
 
 # Encoder for protocol feature
 ohe1 = OneHotEncoder(sparse=False)
@@ -257,3 +255,27 @@ def drop_classes(features, labels, classes_to_drop):
 
     print('Done dropping.  Shape of data %s -- Size of labels %d' % (str(features.shape), len(labels)))
     return features, labels
+
+def save_class_hist(samples_dict: dict, name: str):
+    """
+    Saves the histogram for the specified distribution.  Useful for comparing class distribution during preprocessing
+    :param samples_dict: The dictionary containing class name as the key and the number of samples as the value
+    :param name: Unique name for savefile name.
+    :return: None
+    """
+    classes = samples_dict.keys()
+    samples = []
+    for class_name in classes:
+        samples.append(samples_dict[class_name])
+
+    plt.clf()
+    plt.bar(classes, samples)
+    plt.title('Class Distribution')
+    plt.ylabel('Num Samples')
+    plt.xlabel('Class Name')
+    plt.xticks(rotation=90)
+    plt.grid(True)
+    plt.rc('font', size=32)
+    plt.tight_layout()
+    plt.savefig(os.path.join('./figures/', '%s.png' % name))  # TODO: Update to use specified output directory
+    plt.close('all')
