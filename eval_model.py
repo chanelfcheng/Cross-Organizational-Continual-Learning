@@ -11,7 +11,7 @@ from datasets import get_pytorch_dataset
 from datasets import CIC_2018, USB_2021, CIC_CLASSES, USB_CLASSES, CIC_PATH, USB_PATH
 from datasets.train_test_dataset import TrainTestDataset
 from datasets.transfer_dataset import TransferDataset
-from utils.model import eval_model
+from utils.train_eval import eval
 
 def eval_mlp(args):
     """
@@ -97,7 +97,7 @@ def eval_mlp(args):
     model = model.to(device)
 
     out_path = os.path.abspath(os.path.join('./out/', name))
-    eval_model(model, dataloader, device, out_path, tsne=args.tsne, tsne_percent=args.tsne_percent)
+    eval(model, dataloader, device, out_path, tsne=args.tsne, tsne_percent=args.tsne_percent)
 
 def main():
     parser = argparse.ArgumentParser()

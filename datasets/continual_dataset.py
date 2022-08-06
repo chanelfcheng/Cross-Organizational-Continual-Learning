@@ -12,7 +12,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler, LabelEncoder
 
 from datasets import PKL_PATH
-from utils.data_preprocessing import process_features, remove_invalid, resample_data
+from utils.preprocessing import process_features, remove_invalid, resample_data
 
 class ContinualDataset:
     """

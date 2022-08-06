@@ -11,7 +11,7 @@ from architectures import ARCHITECTURES
 from architectures.mlp import MLP
 from datasets import CIC_2018, CIC_CLASSES, USB_2021, CIC_PATH, USB_CLASSES, USB_PATH
 from datasets.train_test_dataset import TrainTestDataset
-from utils.model import train_model
+from utils.train_eval import train
 
 def train_mlp(args):
     """
@@ -93,10 +93,10 @@ def train_mlp(args):
     eval_batch_freq = len(dataloaders[train]) // 5
     print(f'Evaluation will be performed every {eval_batch_freq} batches.\n')
 
-    out_dir = os.path.join('./out/', name)
-    if not os.path.isdir(out_dir):
-        os.mkdir(out_dir)
-    with open(os.path.join(out_dir, 'config.txt'), 'w') as file:
+    out_path = os.path.join('./out/', name)
+    if not os.path.isdir(out_path):
+        os.mkdir(out_path)
+    with open(os.path.join(out_path, 'config.txt'), 'w') as file:
         file.write('Config for run: %s\n' % name)
         file.write('NUM_EPOCHS: %d\n' % args.n_epochs)
         # file.write('WARMUP_EPOCHS: %d\n' % 2)
@@ -105,8 +105,8 @@ def train_mlp(args):
         # file.write('WARMUP_LR: %e\n' % args.warmup_lr)
         file.write('BATCH_SIZE: %d\n' % args.batch_size)
 
-    trained_model = train_model(model, criterion, optimizer,
-                           lr_scheduler, args.lr_patience, dataloaders, device, eval_batch_freq, out_dir, train, test,
+    trained_model = train(model, criterion, optimizer,
+                           lr_scheduler, args.lr_patience, dataloaders, device, eval_batch_freq, out_path, train, test,
                            n_epochs=args.n_epochs)
     
     return trained_model

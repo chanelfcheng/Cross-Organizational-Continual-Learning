@@ -16,7 +16,7 @@ from matplotlib import pyplot as plt
 from sklearn.manifold import TSNE
 from tqdm import tqdm
 
-def train_model(model, criterion, optimizer, scheduler, patience, dataloaders, device, eval_batch_freq, out_dir, train, test,
+def train(model, criterion, optimizer, scheduler, patience, dataloaders, device, eval_batch_freq, out_path, train, test,
                 n_epochs=25):
     """
     Helper function to perform the model training
@@ -33,7 +33,7 @@ def train_model(model, criterion, optimizer, scheduler, patience, dataloaders, d
     :return: The trained model
     """
     # Model setup
-    writer = SummaryWriter(log_dir=os.path.join(out_dir, 'tensorboard_logs'))
+    writer = SummaryWriter(log_dir=os.path.join(out_path, 'tensorboard_logs'))
 
     since = time.time()
 
@@ -99,7 +99,7 @@ def train_model(model, criterion, optimizer, scheduler, patience, dataloaders, d
 
                     # Evaluate the model every set number of batches
                     if (idx + 1) % eval_batch_freq == 0 and eval_batch_freq > 0:
-                        eval_f1, eval_acc, report = eval_model(model, dataloaders[test], device, out_path=out_dir)
+                        eval_f1, eval_acc, report = eval(model, dataloaders[test], device, out_path=out_path)
                         
                         # Update best f1 score
                         if eval_f1 > best_f1:
@@ -109,10 +109,10 @@ def train_model(model, criterion, optimizer, scheduler, patience, dataloaders, d
                             best_model_wts = copy.deepcopy(model.state_dict())
 
                             # Save best model
-                            torch.save(model.state_dict(), os.path.join(out_dir, 'model_epoch_%d.pt' % epoch))
+                            torch.save(model.state_dict(), os.path.join(out_path, 'model_epoch_%d.pt' % epoch))
 
                             # Save best results
-                            with open(os.path.join(out_dir, 'report.txt'), 'w') as file:
+                            with open(os.path.join(out_path, 'report.txt'), 'w') as file:
                                 file.write(report)
                         
                         # Update best accuracy
@@ -140,7 +140,7 @@ def train_model(model, criterion, optimizer, scheduler, patience, dataloaders, d
                                 print('Best Accuracy: {:4f}'.format(best_acc))
 
                                 # Save time elapsed
-                                with open(os.path.join(out_dir, 'report.txt'), 'a') as file:
+                                with open(os.path.join(out_path, 'report.txt'), 'a') as file:
                                     file.write('\n')
                                     file.write('training time (min): ' + str(time_elapsed / 60))
 
@@ -185,7 +185,7 @@ def train_model(model, criterion, optimizer, scheduler, patience, dataloaders, d
     model.load_state_dict(best_model_wts)
     return model
 
-def eval_model(model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01):
+def eval(model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01):
     """
     Evaluate the given model
     :param model: The MLP model
@@ -274,3 +274,9 @@ def eval_model(model, dataloader, device, out_path=None, tsne=False, tsne_percen
         report = classification_report(all_labels, all_preds, target_names=dataloader.dataset.classes, digits=4)
         print('\n', report)
         return ave_f1_score, top1_acc, report
+
+def train_continual(model):
+    pass
+
+def eval_continual(model):
+    pass

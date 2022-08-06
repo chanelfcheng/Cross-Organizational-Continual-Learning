@@ -8,7 +8,7 @@ import torch
 from torch.utils.data import TensorDataset
 from sklearn.preprocessing import RobustScaler, LabelEncoder
 
-from utils.data_preprocessing import process_features, remove_invalid, resample_data
+from utils.preprocessing import process_features, remove_invalid, resample_data
 from datasets import PKL_PATH
 
 class TrainTestDataset:
