@@ -7,14 +7,14 @@ class MLP(nn.Module):
     def __init__(self, num_features, num_classes, embeddings=False):
         super().__init__()
 
+        self.num_in_features = num_features
         self.embeddings = embeddings
 
-        self.num_out_features = 100
         self.layer1 = nn.Linear(num_features, 100)
         self.layer2 = nn.Linear(100, 200)
         self.layer3 = nn.Linear(200, 500)
         self.layer4 = nn.Linear(500, 200)
-        self.layer5 = nn.Linear(200, self.num_out_features)
+        self.layer5 = nn.Linear(200, 100)
         self.fc = nn.Linear(100, num_classes)
 
         self.act = nn.ReLU()
@@ -27,7 +27,7 @@ class MLP(nn.Module):
         x = self.act(self.layer4(x))
         features = self.act(self.layer5(x))
         x = self.fc(features)
-        x = self.softmax(x)
+        # x = self.softmax(x)
 
         if self.embeddings:
             return x, features

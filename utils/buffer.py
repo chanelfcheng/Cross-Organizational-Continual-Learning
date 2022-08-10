@@ -6,9 +6,10 @@ from torchvision import transforms
 
 def reservoir(model, current_input: torch.tensor):
     outputs = model(current_input.float())
-    probability, _ = torch.max(outputs, 1)
+    probabilities = torch.nn.functional.softmax(outputs, dim=0)
+    max_prob, _ = torch.max(probabilities, 0)
 
-    if probability < 0.7:
+    if max_prob < 0.7:
         return True
     else:
         return False

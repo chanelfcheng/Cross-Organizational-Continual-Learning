@@ -1,4 +1,5 @@
 import os
+import argparse
 
 import torch.nn as nn
 import torch.optim as optim
@@ -8,6 +9,7 @@ import torchvision
 from torch.nn import functional as F
 from argparse import Namespace
 
+from architectures import ARCHITECTURES
 from architectures.mlp import MLP
 from datasets import CIC_2018, USB_2021, CIC_CLASSES, USB_CLASSES, CIC_PATH, USB_PATH
 from datasets.continual_dataset import ContinualDataset
@@ -22,12 +24,12 @@ class ContinualModel(nn.Module):
     NAME = None
     COMPATIBILITY = []
 
-    def __init__(self, backbone: nn.Module, loss: nn.Module,
+    def __init__(self, architecture: nn.Module, criterion: nn.Module,
                 args: Namespace) -> None:
         super(ContinualModel, self).__init__()
 
-        self.net = backbone
-        self.loss = loss
+        self.net = architecture
+        self.loss = criterion
         self.args = args
         self.opt = SGD(self.net.parameters(), lr=self.args.lr)
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -41,13 +43,11 @@ class ContinualModel(nn.Module):
         """
         return self.net(x)
 
-    def observe(self, inputs: torch.Tensor, labels: torch.Tensor,
-                not_aug_inputs: torch.Tensor) -> float:
+    def observe(self, inputs: torch.Tensor, labels: torch.Tensor) -> float:
         """
         Compute a training step over a given batch of examples.
         :param inputs: batch of examples
         :param labels: ground-truth labels
-        :param kwargs: some methods could require additional parameters
         :return: the value of the loss function
         """
         pass
@@ -56,11 +56,11 @@ class Er(ContinualModel):
     NAME = 'er'
     COMPATIBILITY = ['class-il', 'domain-il', 'task-il', 'general-continual']
 
-    def __init__(self, backbone, loss, args):
-        super(Er, self).__init__(backbone, loss, args)
-        self.buffer = Buffer(self.args.buffer_size, self.device)
+    def __init__(self, architecture, criterion, args):
+        super(Er, self).__init__(architecture, criterion, args)
+        self.buffer = Buffer(self.args.buffer_size, self.net.num_in_features, self.device)
 
-    def observe(self, inputs, labels, not_aug_inputs):
+    def observe(self, inputs, labels):
 
         real_batch_size = inputs.shape[0]
 
@@ -69,15 +69,15 @@ class Er(ContinualModel):
             buf_inputs, buf_labels = self.buffer.get_data(
                 self.args.minibatch_size)
             inputs = torch.cat((inputs, buf_inputs))
-            labels = torch.cat((labels, buf_labels))
+            labels = torch.cat((labels, buf_labels.flatten()))
 
-        outputs = self.net(inputs)
+        outputs = self.net(inputs.float())
         loss = self.loss(outputs, labels)
         loss.backward()
         self.opt.step()
 
-        self.buffer.add_data(examples=not_aug_inputs,
-                             labels=labels[:real_batch_size])
+        self.buffer.add_data(self.net, examples=inputs,
+                             labels=labels)
 
         return loss.item()
     
@@ -86,11 +86,11 @@ class Der(ContinualModel):
     NAME = 'der'
     COMPATIBILITY = ['class-il', 'domain-il', 'task-il', 'general-continual']
 
-    def __init__(self, backbone, loss, args):
-        super(Der, self).__init__(backbone, loss, args)
+    def __init__(self, architecture, criterion, args):
+        super(Der, self).__init__(architecture, criterion, args)
         self.buffer = Buffer(self.args.buffer_size, self.device)
 
-    def observe(self, inputs, labels, not_aug_inputs):
+    def observe(self, inputs, labels):
 
         self.opt.zero_grad()
 
@@ -105,7 +105,7 @@ class Der(ContinualModel):
 
         loss.backward()
         self.opt.step()
-        self.buffer.add_data(examples=not_aug_inputs, logits=outputs.data)
+        self.buffer.add_data(examples=inputs, logits=outputs.data)
 
         return loss.item()
     
@@ -113,20 +113,20 @@ def train_mlp(args):
     name = args.arch + '-' + args.exp
     include_categorical = args.categorical
 
-    if args.exp == 'cic-only':
-        data_sets = [CIC_2018]
+    if args.exp == 'continual-cic':
+        dataset_names = [CIC_2018]
         classes = list(set(CIC_CLASSES))
-        data_paths = [CIC_PATH]
-    if args.exp == 'usb-only':
-        data_sets = [USB_2021]
+        dataset_paths = [CIC_PATH]
+    if args.exp == 'continual-usb':
+        dataset_names = [USB_2021]
         classes = list(set(USB_CLASSES))
-        data_paths = [USB_PATH]
-    if args.exp == 'cic-usb':
-        data_sets = [CIC_2018, USB_2021]
+        dataset_paths = [USB_PATH]
+    if args.exp == 'continual-cic-usb':
+        dataset_names = [CIC_2018, USB_2021]
         classes = list(set(CIC_CLASSES + USB_CLASSES))
-        data_paths = [CIC_PATH, USB_PATH]
+        dataset_paths = [CIC_PATH, USB_PATH]
     
-    cd = ContinualDataset(data_sets, classes, data_paths, args)
+    dataset = ContinualDataset(dataset_names, classes, dataset_paths, args)
     train = 'train'
     test = 'test'
 
@@ -134,15 +134,12 @@ def train_mlp(args):
     print(device)
 
     # Initialize model
-    model = MLP(88 if include_categorical else 76, cd.num_classes)
-
-    model = model.to(device)
-
+    architecture = MLP(88 if include_categorical else 76, dataset.num_classes)
     criterion = FocalLoss(gamma=2)
-    optimizer = optim.RAdam(model.parameters(), lr=args.lr)
-    lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=args.lr_patience)
+    # criterion = nn.CrossEntropyLoss()
+    optimizer = optim.RAdam(architecture.parameters(), lr=args.lr)
+    model = Er(architecture, criterion, args)
 
-    # Could make this a command line argument
     out_dir = os.path.join('./out/', name)
     if not os.path.isdir(out_dir):
         os.mkdir(out_dir)
@@ -155,4 +152,25 @@ def train_mlp(args):
         # file.write('WARMUP_LR: %e\n' % args.warmup_lr)
         file.write('BATCH_SIZE: %d\n' % args.batch_size)
     
-    trained_model = train_continual(model)
+    train_continual(model, dataset, args)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--arch', type=str, required=True, choices=ARCHITECTURES, help='The model architecture')
+    parser.add_argument('--exp', type=str, required=True, choices=['continual-cic', 'continual-usb', 'continual-cic-usb'], help='The experimental setup for continual learning')
+    parser.add_argument('--categorical', default=True, help='Option to include or not include categorical features in the model')
+    parser.add_argument('--num-rounds', type=int, default=3)
+    parser.add_argument('--n-epochs', type=int, default=1, help='Number of epochs to train')
+    parser.add_argument('--batch-size', type=int, default=4, help='Number of samples per batch')
+    parser.add_argument('--minibatch-size', type=int, default=16, help='Number of samples per minibatch')
+    parser.add_argument('--buffer-size', type=int, default=1000, help='Maximum number of samples the buffer can hold')
+    parser.add_argument('--alpha', type=float, default=0.5, help='Alpha term for balancing trade-off between past and current loss')
+    parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate during training')
+
+    args = parser.parse_args()
+
+    if args.arch == 'mlp':
+        train_mlp(args)
+
+if __name__ == '__main__':
+    main()

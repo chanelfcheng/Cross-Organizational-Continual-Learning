@@ -4,6 +4,7 @@ import time
 import csv
 import math
 import copy
+from datetime import datetime
 
 import numpy as np
 import pandas as pd
@@ -275,8 +276,52 @@ def eval(model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01
         print('\n', report)
         return ave_f1_score, top1_acc, report
 
-def train_continual(model):
-    pass
 
-def eval_continual(model):
-    pass
+def train_continual(model, dataset, args):
+    model.net.to(model.device)
+
+    model.net.train()
+    epoch, i = 0, 0
+    while not dataset.train_over:
+        inputs, labels = dataset.get_train_data()
+        inputs, labels = inputs.to(model.device), labels.to(model.device)
+        loss = model.observe(inputs.float(), labels)
+        progress_bar(i, len(dataset.train_dataset) // args.batch_size, epoch, 'C', loss)
+        i += 1
+
+    report, report_dict = eval_continual(model, dataset)
+    print(report)
+
+def eval_continual(model, dataset):
+    model.net.eval()
+    start_test = True
+    
+    while not dataset.test_over:
+        inputs, labels = dataset.get_test_data()
+        inputs, labels = inputs.to(model.device), labels.to(model.device)
+        outputs = model(inputs.float())
+        _, preds = torch.max(outputs.data, 1)
+
+        if start_test:
+            all_preds = preds.float().cpu()
+            all_labels = labels.float()
+            start_test = False
+        else:
+            all_preds = torch.cat((all_preds, preds.float().cpu()), 0)
+            all_labels = torch.cat((all_labels, labels.float()), 0)
+
+    report = classification_report(all_labels, all_preds, target_names=dataset.classes, digits=4)
+    report_dict = classification_report(all_labels, all_preds, target_names=dataset.classes, digits=4, output_dict=True)
+    return report, report_dict
+
+def progress_bar(i, max_iter, epoch, task_number, loss):
+    if not (i + 1) % 100 or (i + 1) == max_iter:
+        progress = min(float((i + 1) / max_iter), 1)
+        progress_bar = ('█' * int(50 * progress)) + ('┈' * (50 - int(50 * progress)))
+        print('\r[ {} ] Task {} | epoch {}: |{}| loss: {}'.format(
+            datetime.now().strftime("%m-%d | %H:%M"),
+            task_number + 1 if isinstance(task_number, int) else task_number,
+            epoch,
+            progress_bar,
+            round(loss, 8)
+        ), file=sys.stderr, end='', flush=True)

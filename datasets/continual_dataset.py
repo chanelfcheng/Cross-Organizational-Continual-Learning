@@ -18,7 +18,10 @@ class ContinualDataset:
     """
     Dataset for continual learning setting used to evaluate learning from a continuous stream of data.
     """
-    def __init__(self, data_sets, classes, data_paths, args):
+    SETTING = 'General Continual Learning'
+    NAME = 'IDS'
+
+    def __init__(self, dataset_names, classes, dataset_paths, args):
         # Set initial variables
         self.num_classes = len(classes)
         self.args = args
@@ -34,12 +37,13 @@ class ContinualDataset:
         self.label_mapping = {}
         for i in range(self.num_classes):
             self.label_mapping[classes[i]] = i
+        self.classes = list(self.label_mapping.keys())
         
         # Load the data
-        self.features_train, self.features_test, self.labels_train, self.labels_test = load_data(data_sets[0] + '-continual', data_paths[0], self.args.categorical)
-        if len(data_sets) > 1:
-            for i in range(1, len(data_sets)):
-                features_train, features_test, labels_train, labels_test = load_data(data_sets[i] + '-continual', data_paths[i], self.args.categorical)
+        self.features_train, self.features_test, self.labels_train, self.labels_test = load_data(dataset_names[0] + '-continual', dataset_paths[0], self.args.categorical)
+        if len(dataset_names) > 1:
+            for i in range(1, len(dataset_names)):
+                features_train, features_test, labels_train, labels_test = load_data(dataset_names[i] + '-continual', dataset_paths[i], self.args.categorical)
                 self.features_train = np.concatenate([self.features_train, features_train])
                 self.features_test = np.concatenate([self.features_test, features_test])
                 self.labels_train = np.concatenate([self.labels_train, labels_train]).tolist()
@@ -49,7 +53,7 @@ class ContinualDataset:
         self.train_dataset, self.test_dataset = self.get_pytorch_datasets(self.args.arch) 
 
         # Initialize the data loaders
-        self.init_data_loaders(data_sets, data_paths)
+        self.init_data_loaders(dataset_names, dataset_paths)
 
         # Set active data loaders
         self.active_train_loaders = [
@@ -191,14 +195,14 @@ class ContinualDataset:
         labels_test = torch.tensor(le_test)
 
         # Create pytorch datasets with labels
-        dataset_train = TensorDataset(features_train, labels_train)
-        dataset_test = TensorDataset(features_test, labels_test)
+        train_dataset = TensorDataset(features_train, labels_train)
+        test_dataset = TensorDataset(features_test, labels_test)
 
         # Define dataset classes
-        dataset_train.classes = self.label_mapping.keys()
-        dataset_test.classes = self.label_mapping.keys()
+        train_dataset.classes = self.classes
+        test_dataset.classes = self.classes
 
-        return dataset_train, dataset_test
+        return train_dataset, test_dataset
 
 def load_data(dset, data_path, include_categorical=True):
     """
