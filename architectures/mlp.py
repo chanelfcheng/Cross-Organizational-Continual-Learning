@@ -18,7 +18,7 @@ class MLP(nn.Module):
         self.fc = nn.Linear(100, num_classes)
 
         self.act = nn.ReLU()
-        self.softmax = nn.Softmax(dim=0)
+        # self.softmax = nn.Softmax(dim=0)
 
     def forward(self, x):
         x = self.act(self.layer1(x))

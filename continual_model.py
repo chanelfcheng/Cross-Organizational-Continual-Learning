@@ -1,6 +1,7 @@
 import os
 import argparse
 
+import numpy as np
 import torch.nn as nn
 import torch.optim as optim
 from torch.optim import SGD
@@ -11,11 +12,12 @@ from argparse import Namespace
 
 from architectures import ARCHITECTURES
 from architectures.mlp import MLP
-from datasets import CIC_2018, USB_2021, CIC_CLASSES, USB_CLASSES, CIC_PATH, USB_PATH
+from datasets import CIC_2018, USB_2021, CIC_CLASSES, USB_CLASSES, CIC_PATH, USB_PATH, get_support
 from datasets.continual_dataset import ContinualDataset
 from utils.buffer import Buffer
 from utils.focal_loss import FocalLoss
-from utils.train_eval import train_continual
+from utils.train_eval import train_continual, eval_continual
+from utils import create_if_not_exists
 
 class ContinualModel(nn.Module):
     """
@@ -24,14 +26,14 @@ class ContinualModel(nn.Module):
     NAME = None
     COMPATIBILITY = []
 
-    def __init__(self, architecture: nn.Module, criterion: nn.Module,
+    def __init__(self, architecture: nn.Module, criterion: nn.Module, optimizer: nn.Module,
                 args: Namespace) -> None:
         super(ContinualModel, self).__init__()
 
         self.net = architecture
         self.loss = criterion
         self.args = args
-        self.opt = SGD(self.net.parameters(), lr=self.args.lr)
+        self.opt = optimizer
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
@@ -56,13 +58,14 @@ class Er(ContinualModel):
     NAME = 'er'
     COMPATIBILITY = ['class-il', 'domain-il', 'task-il', 'general-continual']
 
-    def __init__(self, architecture, criterion, args):
-        super(Er, self).__init__(architecture, criterion, args)
+    def __init__(self, architecture, criterion, optimizer, args):
+        super(Er, self).__init__(architecture, criterion, optimizer, args)
         self.buffer = Buffer(self.args.buffer_size, self.net.num_in_features, self.device)
 
     def observe(self, inputs, labels):
 
-        real_batch_size = inputs.shape[0]
+        self.buffer.add_data(self.net, examples=inputs,
+                             labels=labels)
 
         self.opt.zero_grad()
         if not self.buffer.is_empty():
@@ -76,9 +79,6 @@ class Er(ContinualModel):
         loss.backward()
         self.opt.step()
 
-        self.buffer.add_data(self.net, examples=inputs,
-                             labels=labels)
-
         return loss.item()
     
 
@@ -86,8 +86,8 @@ class Der(ContinualModel):
     NAME = 'der'
     COMPATIBILITY = ['class-il', 'domain-il', 'task-il', 'general-continual']
 
-    def __init__(self, architecture, criterion, args):
-        super(Der, self).__init__(architecture, criterion, args)
+    def __init__(self, architecture, criterion, optimizer, args):
+        super(Der, self).__init__(architecture, criterion, optimizer, args)
         self.buffer = Buffer(self.args.buffer_size, self.device)
 
     def observe(self, inputs, labels):
@@ -115,44 +115,61 @@ def train_mlp(args):
 
     if args.exp == 'continual-cic':
         dataset_names = [CIC_2018]
-        classes = list(set(CIC_CLASSES))
+        classes = CIC_CLASSES
         dataset_paths = [CIC_PATH]
     if args.exp == 'continual-usb':
         dataset_names = [USB_2021]
-        classes = list(set(USB_CLASSES))
+        classes = USB_CLASSES
         dataset_paths = [USB_PATH]
     if args.exp == 'continual-cic-usb':
         dataset_names = [CIC_2018, USB_2021]
-        classes = list(set(CIC_CLASSES + USB_CLASSES))
+        classes = list(dict.fromkeys(CIC_CLASSES + USB_CLASSES))
         dataset_paths = [CIC_PATH, USB_PATH]
     
     dataset = ContinualDataset(dataset_names, classes, dataset_paths, args)
-    train = 'train'
-    test = 'test'
+    print('\nContinual dataset:', dataset_names)
+    print('Classes:', classes)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(device)
+
+    # Get class weights
+    train_support = get_support(dataset.train_dataset)
+    weights = 1 / np.array( list( train_support.values() ) )
+    weights = weights / np.sum(weights) * dataset.num_classes
+    weights = torch.Tensor(weights).to(device)
 
     # Initialize model
     architecture = MLP(88 if include_categorical else 76, dataset.num_classes)
     criterion = FocalLoss(gamma=2)
     # criterion = nn.CrossEntropyLoss()
     optimizer = optim.RAdam(architecture.parameters(), lr=args.lr)
-    model = Er(architecture, criterion, args)
+    # optimizer = SGD(architecture.parameters(), lr=args.lr)
+    if args.alpha > 0:
+        model = Der(architecture, criterion, optimizer, args)
+    else:
+        model = Er(architecture, criterion, optimizer, args)
 
-    out_dir = os.path.join('./out/', name)
-    if not os.path.isdir(out_dir):
-        os.mkdir(out_dir)
-    with open(os.path.join(out_dir, 'config.txt'), 'w') as file:
-        file.write('Config for run: %s\n' % name)
-        file.write('NUM_EPOCHS: %d\n' % args.n_epochs)
-        # file.write('WARMUP_EPOCHS: %d\n' % 2)
-        file.write('LR: %e\n' % args.lr)
-        # file.write('MIN_LR: %e\n' % 1e-6)
-        # file.write('WARMUP_LR: %e\n' % args.warmup_lr)
-        file.write('BATCH_SIZE: %d\n' % args.batch_size)
+    out_path = os.path.join('./out/', name)
+    create_if_not_exists(out_path)
+
+    counter = 0
+    while os.path.exists(os.path.join(out_path, f'log_{counter}.txt')):
+        counter += 1
     
-    train_continual(model, dataset, args)
+    with open(os.path.join(out_path, f'log_{counter}.txt'), 'w') as file:
+        file.write('Config for run: %s\n' % name)
+        file.write('CATEGORICAL: %s\n' % args.categorical)
+        file.write('NUM_ROUNDS: %d\n' % args.num_rounds)
+        file.write('NUM_EPOCHS: %d\n' % args.n_epochs)
+        file.write('BATCH_SIZE: %d\n' % args.batch_size)
+        file.write('MINIBATCH_SIZE: %d\n' % args.minibatch_size)
+        file.write('BUFFER_SIZE: %d\n' % args.buffer_size)
+        if args.alpha > 0: file.write('ALPHA: %0.2f\n' % args.alpha)
+        file.write('LR: %e\n' % args.lr)
+    
+    train_continual(model, dataset, out_path, args)
+    eval_continual(model, dataset, out_path, counter)
 
 def main():
     parser = argparse.ArgumentParser()
@@ -161,10 +178,10 @@ def main():
     parser.add_argument('--categorical', default=True, help='Option to include or not include categorical features in the model')
     parser.add_argument('--num-rounds', type=int, default=3)
     parser.add_argument('--n-epochs', type=int, default=1, help='Number of epochs to train')
-    parser.add_argument('--batch-size', type=int, default=4, help='Number of samples per batch')
-    parser.add_argument('--minibatch-size', type=int, default=16, help='Number of samples per minibatch')
+    parser.add_argument('--batch-size', type=int, default=64, help='Number of samples per batch')
+    parser.add_argument('--minibatch-size', type=int, default=256, help='Number of samples per minibatch')
     parser.add_argument('--buffer-size', type=int, default=1000, help='Maximum number of samples the buffer can hold')
-    parser.add_argument('--alpha', type=float, default=0.5, help='Alpha term for balancing trade-off between past and current loss')
+    parser.add_argument('--alpha', type=float, default=-1, help='Alpha term for balancing trade-off between past and current samples')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate during training')
 
     args = parser.parse_args()

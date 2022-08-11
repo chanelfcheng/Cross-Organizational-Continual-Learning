@@ -63,7 +63,7 @@ class ContinualDataset:
         self.active_remaining_training_items = [
             self.remaining_training_items[self.train_classes[0]],
             self.remaining_training_items[self.train_classes[1]]]
-        print('Continual dataset ready!')
+        # print('Continual dataset ready.')
 
     def train_next_class(self):
         """
@@ -71,6 +71,7 @@ class ContinualDataset:
         """
         self.train_classes[1] += 1
         if self.train_classes[1] == self.num_classes: self.train_classes[1] = 1
+        print('Current malicious class:', list(self.label_mapping.keys())[self.train_classes[1]])
 
         if self.train_classes[1] == 1:
             self.completed_rounds += 1
@@ -89,7 +90,7 @@ class ContinualDataset:
         """
         Initializes the data loaders.
         """
-        print('\nInitializing data loaders...')
+        # print('Initializing data loaders...')
         # Fill the train loaders
         for j in range(self.num_classes):
             mask = np.isin(np.array(self.train_dataset.tensors[1]), [j])
@@ -138,7 +139,8 @@ class ContinualDataset:
         self.active_remaining_training_items[0] -= batch_size_0
         self.active_remaining_training_items[1] -= batch_size_1
 
-        if self.active_remaining_training_items[0] <= 0 or self.active_remaining_training_items[0] <= 0:
+        # print(self.active_remaining_training_items[0])
+        if self.active_remaining_training_items[0] <= 0 or self.active_remaining_training_items[1] <= 0:
             self.train_next_class()
         
         return x_train, y_train
@@ -165,7 +167,7 @@ class ContinualDataset:
         return x_test, y_test
 
     def get_pytorch_datasets(self, arch='mlp'):
-        print('\nGetting pytorch datasets...')
+        # print('Getting pytorch datasets...')
         # Fit scaler to train features and scale the train and test features
         scale = RobustScaler(quantile_range=(5,95)).fit(self.features_train)
         features_train = scale.transform(self.features_train)
@@ -261,9 +263,9 @@ def load_data(dset, data_path, include_categorical=True):
         # Perform train/test split of 80-20
         features_train, features_test, labels_train, labels_test = train_test_split(all_features, all_labels, test_size=0.2)
 
-        # Resample training data
-        print('\nResampling training data...')
-        features_train, labels_train = resample_data(dset, features_train, labels_train)
+        # # Resample training data
+        # print('\nResampling training data...')
+        # features_train, labels_train = resample_data(dset, features_train, labels_train)
         
         # Save to pickle file
         with open(os.path.join(PKL_PATH, f'{dset}.pkl'), 'wb') as file:
