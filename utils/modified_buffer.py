@@ -13,29 +13,38 @@ def reservoir(model, current_input: torch.tensor):
         return False
 
 class Buffer:
-    def __init__(self, buffer_size, num_features, device):
+    def __init__(self, buffer_size, device):
         self.buffer_size = buffer_size
-        self.num_features = num_features
         self.device = device
         self.position = 0
         self.num_examples = 0
-        self.examples = torch.zeros((self.buffer_size, self.num_features), dtype=torch.float32, device=self.device)
-        self.labels = torch.zeros((self.buffer_size, 1), dtype=torch.int64, device=self.device)
+        self.attributes = ['examples', 'labels', 'logits']
 
     def __len__(self):
         return min(self.num_examples, self.buffer_size)
 
-    def add_data(self, model, examples, labels=None):
+    def init_tensors(self, examples, labels, logits):
+        for attr_str in self.attributes:
+            attr = eval(attr_str)
+            if attr is not None and not hasattr(self, attr_str):
+                typ = torch.int64 if attr_str=='labels' else torch.float32
+                setattr(self, attr_str, torch.zeros((self.buffer_size,
+                        *attr.shape[1:]), dtype=typ, device=self.device))
+
+    def add_data(self, model, examples, labels=None, logits=None):
+        if not hasattr(self, 'examples'):
+            self.init_tensors(examples, labels, logits)
         
         for i in range(examples.shape[0]):
             uncertain = reservoir(model, examples[i])
+            index = np.random.randint(0, self.num_examples) if self.num_examples > 0 else 0
             if uncertain:
-                self.examples[self.position] = examples[i].to(self.device)
-                self.labels[self.position] = labels[i].to(self.device)
-                self.position += 1
-
-                if self.position >= self.buffer_size:
-                    self.position = 0
+                self.examples[index] = examples[i].to(self.device)
+                                
+                if labels is not None:
+                    self.labels[index] = labels[i].to(self.device)
+                if logits is not None:
+                    self.logits[index] = logits[i].to(self.device)
                 
                 if self.num_examples < self.buffer_size:
                     self.num_examples += 1
@@ -47,10 +56,23 @@ class Buffer:
         
         choice = np.random.choice(min(self.num_examples, self.examples.shape[0]), size=size, replace=False)
 
-        return self.examples[choice].to(self.device), self.labels[choice].to(self.device)
+        ret_tuple = (self.examples[choice].to(self.device),)
+        for attr_str in self.attributes[1:]:
+            if hasattr(self, attr_str):
+                attr = getattr(self, attr_str)
+                ret_tuple += (attr[choice].to(self.device),)
+
+        return ret_tuple
 
     def get_all_data(self):
-        return self.examples.to(self.device), self.labels.to(self.device)
+        ret_tuple = (self.examples.to(self.device),)
+
+        for attr_str in self.attributes[1:]:
+            if hasattr(self, attr_str):
+                attr = getattr(self, attr_str)
+                ret_tuple += (attr,)
+        
+        return ret_tuple
 
     def is_empty(self):
         if self.num_examples == 0:

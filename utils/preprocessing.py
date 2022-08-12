@@ -209,7 +209,6 @@ def resample_data(dset, features, labels):
     largest_class = max(class_samples, key=class_samples.get)
     target_dict = {}
     target_num = round(largest_num * 0.50)
-    print(f'Number of {largest_class} samples: ')
     print('Targeting %d samples for each minority class' % target_num)
     for label in class_samples.keys():
         if label == largest_class or class_samples[label] > target_num:

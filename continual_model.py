@@ -13,7 +13,7 @@ from architectures import ARCHITECTURES
 from architectures.mlp import MLP
 from datasets import CIC_2018, USB_2021, CIC_CLASSES, USB_CLASSES, CIC_PATH, USB_PATH, get_support
 from datasets.continual_dataset import ContinualDataset
-from utils.modified_buffer import Buffer
+from utils.random_buffer import Buffer
 from utils.focal_loss import FocalLoss
 from utils.train_eval import train_continual
 from utils import create_if_not_exists
@@ -59,11 +59,11 @@ class Er(ContinualModel):
 
     def __init__(self, architecture, criterion, optimizer, args):
         super(Er, self).__init__(architecture, criterion, optimizer, args)
-        self.buffer = Buffer(self.args.buffer_size, self.net.num_in_features, self.device)
+        self.buffer = Buffer(self.args.buffer_size, self.device)
 
     def observe(self, inputs, labels):
 
-        self.buffer.add_data(self.net, examples=inputs,
+        self.buffer.add_data(examples=inputs,
                              labels=labels)
 
         self.opt.zero_grad()
@@ -72,7 +72,7 @@ class Er(ContinualModel):
                 self.args.minibatch_size)
 
             # support = {}
-            # for label in np.array(buf_labels.flatten().detach().cpu()):
+            # for label in np.array(buf_labels.detach().cpu()):
             #     if label not in support:
             #         support[label] = 1
             #     else:
@@ -80,9 +80,9 @@ class Er(ContinualModel):
             # print(support)
 
             inputs = torch.cat((inputs, buf_inputs))
-            labels = torch.cat((labels, buf_labels.flatten()))
+            labels = torch.cat((labels, buf_labels))
 
-        outputs = self.net(inputs.float())
+        outputs = self.net(inputs)
         loss = self.loss(outputs, labels)
         loss.backward()
         self.opt.step()
@@ -96,31 +96,24 @@ class Der(ContinualModel):
 
     def __init__(self, architecture, criterion, optimizer, args):
         super(Der, self).__init__(architecture, criterion, optimizer, args)
-        self.buffer = Buffer(self.args.buffer_size, self.net.num_in_features, self.device)
+        self.buffer = Buffer(self.args.buffer_size, self.device)
 
     def observe(self, inputs, labels):
 
         self.opt.zero_grad()
 
-        outputs = self.net(inputs.float())
-        # print(outputs)
-        # print(labels)
-        # quit()
+        outputs = self.net(inputs)
         loss = self.loss(outputs, labels)
 
         if not self.buffer.is_empty():
             buf_inputs, buf_logits = self.buffer.get_data(
                 self.args.minibatch_size)
-            buf_outputs = self.net(buf_inputs.float())
-            _, buf_outputs = torch.max(buf_outputs.data, 1)
-            loss += self.args.alpha * F.mse_loss(buf_outputs.view(-1,1), buf_logits.float())
+            buf_outputs = self.net(buf_inputs)
+            loss += self.args.alpha * F.mse_loss(buf_outputs, buf_logits)
 
         loss.backward()
         self.opt.step()
-        # print(inputs.shape)
-        # print(outputs.shape)
-        # quit()
-        self.buffer.add_data(self.net, examples=inputs, labels=outputs.data.flatten())
+        self.buffer.add_data(examples=inputs, logits=outputs.data)
 
         return loss.item()
     

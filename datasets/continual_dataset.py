@@ -248,7 +248,7 @@ def load_data(dset, data_path, include_categorical=True):
                 features, labels = process_features(dset, df.sample(frac=0.1), include_categorical)
 
                 # Convert dataframe to numpy array for processing
-                data_np = np.array(features.to_numpy(), dtype=float)
+                data_np = np.array(features.to_numpy(), dtype=np.float32)
                 labels_lst = labels.tolist()
 
                 data_np, labels_lst, num_invalid = remove_invalid(data_np, labels_lst)  # Clean data of invalid values
