@@ -151,7 +151,7 @@ class ContinualDataset:
         self.active_remaining_training_items[0] -= batch_size_0
         self.active_remaining_training_items[1] -= batch_size_1
 
-        print(self.active_remaining_training_items[0], self.active_remaining_training_items[1])
+        # print(self.active_remaining_training_items[0], self.active_remaining_training_items[1])
         if self.active_remaining_training_items[0] <= 0 or self.active_remaining_training_items[1] <= 0:
             self.train_next_class()
         
