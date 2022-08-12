@@ -9,7 +9,7 @@ import torch
 
 from torch.utils.data import TensorDataset, DataLoader
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import RobustScaler, LabelEncoder
+from sklearn.preprocessing import RobustScaler
 
 from datasets import PKL_PATH
 from utils.preprocessing import process_features, remove_invalid, resample_data

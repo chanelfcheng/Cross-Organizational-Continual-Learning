@@ -1,8 +1,6 @@
 import copy
 import torch
 import numpy as np
-from typing import Tuple
-from torchvision import transforms
 
 def reservoir(model, current_input: torch.tensor):
     outputs = model(current_input.float())

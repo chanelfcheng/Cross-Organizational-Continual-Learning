@@ -6,7 +6,6 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.optim import SGD
 import torch
-import torchvision
 from torch.nn import functional as F
 from argparse import Namespace
 
@@ -14,9 +13,9 @@ from architectures import ARCHITECTURES
 from architectures.mlp import MLP
 from datasets import CIC_2018, USB_2021, CIC_CLASSES, USB_CLASSES, CIC_PATH, USB_PATH, get_support
 from datasets.continual_dataset import ContinualDataset
-from utils.buffer import Buffer
+from utils.modified_buffer import Buffer
 from utils.focal_loss import FocalLoss
-from utils.train_eval import train_continual, eval_continual
+from utils.train_eval import train_continual
 from utils import create_if_not_exists
 
 class ContinualModel(nn.Module):
@@ -71,15 +70,15 @@ class Er(ContinualModel):
         if not self.buffer.is_empty():
             buf_inputs, buf_labels = self.buffer.get_data(
                 self.args.minibatch_size)
-#########################################
-            support = {}
-            for label in np.array(buf_labels.flatten().detach().cpu()):
-                if label not in support:
-                    support[label] = 1
-                else:
-                    support[label] += 1
-            print(support)
-#########################################
+
+            # support = {}
+            # for label in np.array(buf_labels.flatten().detach().cpu()):
+            #     if label not in support:
+            #         support[label] = 1
+            #     else:
+            #         support[label] += 1
+            # print(support)
+
             inputs = torch.cat((inputs, buf_inputs))
             labels = torch.cat((labels, buf_labels.flatten()))
 
