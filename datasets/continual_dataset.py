@@ -75,7 +75,7 @@ class ContinualDataset:
         """
         self.train_classes[1] += 1
         if self.train_classes[1] == self.num_classes: self.train_classes[1] = 1
-        print('Current malicious class:', list(self.label_mapping.keys())[self.train_classes[1]])
+        print('\nCurrent malicious class:', list(self.label_mapping.keys())[self.train_classes[1]])
 
         if self.train_classes[1] == 1:
             self.completed_rounds += 1

@@ -304,7 +304,7 @@ def train_continual(model, dataset, out_path, counter, args):
     print(f'\nTraining complete in {timedelta(seconds=round(time_elapsed))}')
 
     with open(os.path.join(out_path, f'log_{counter}.txt'), 'a') as file:
-        file.write(f'\nTraining complete in {timedelta(seconds=round(time_elapsed))}')
+        file.write(f'\nTraining complete in {timedelta(seconds=round(time_elapsed))}\n')
 
     torch.save(model.state_dict(), os.path.join(out_path, f'model_{counter}.pt'))
 
@@ -336,7 +336,7 @@ def eval_continual(model, dataset, out_path, counter):
     print(report)
 
     with open(os.path.join(out_path, f'log_{counter}.txt'), 'a') as file:
-        file.write('\n' + report)
+        file.write(f'\n{report}\n')
     
     return report
 

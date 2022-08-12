@@ -71,6 +71,15 @@ class Er(ContinualModel):
         if not self.buffer.is_empty():
             buf_inputs, buf_labels = self.buffer.get_data(
                 self.args.minibatch_size)
+#########################################
+            support = {}
+            for label in np.array(buf_labels.flatten().detach().cpu()):
+                if label not in support:
+                    support[label] = 1
+                else:
+                    support[label] += 1
+            print(support)
+#########################################
             inputs = torch.cat((inputs, buf_inputs))
             labels = torch.cat((labels, buf_labels.flatten()))
 
@@ -142,6 +151,7 @@ def train_mlp(args):
 
     # Get class weights
     train_support = get_support(dataset.train_dataset)
+    train_support = dict(sorted(train_support.items()))
     weights = 1 / np.array( list( train_support.values() ) )
     weights = weights / np.sum(weights) * dataset.num_classes
     weights = torch.Tensor(weights).to(device)
