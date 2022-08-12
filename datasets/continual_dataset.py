@@ -31,7 +31,7 @@ class ContinualDataset:
         self.remaining_training_items = []
 
         self.train_classes = [0, 1]
-        self.completed_rounds, self.test_class, self.test_iteration = 0, 0, 0
+        self.completed_rounds, self.train_iteration, self.test_class, self.test_iteration = 0, 0, 0, 0
 
         # Get label mapping
         self.label_mapping = {}
@@ -49,6 +49,10 @@ class ContinualDataset:
                 self.labels_train = np.concatenate([self.labels_train, labels_train]).tolist()
                 self.labels_test = np.concatenate([self.labels_test, labels_test]).tolist()
 
+        # Resample training data
+        print('\nResampling training data...')
+        self.features_train, self.labels_train = resample_data('continual', self.features_train, self.labels_train)
+
         # Get train and test datasets
         self.train_dataset, self.test_dataset = self.get_pytorch_datasets(self.args.arch) 
 
@@ -57,12 +61,12 @@ class ContinualDataset:
 
         # Set active data loaders
         self.active_train_loaders = [
-            self.train_loaders[self.train_classes[0]],
-            self.train_loaders[self.train_classes[1]]]
+            self.train_loaders[self.train_classes[0]][0], 
+            self.train_loaders[self.train_classes[1]].pop()]
 
         self.active_remaining_training_items = [
-            self.remaining_training_items[self.train_classes[0]],
-            self.remaining_training_items[self.train_classes[1]]]
+            self.remaining_training_items[self.train_classes[0]][0],
+            self.remaining_training_items[self.train_classes[1]].pop()]
         # print('Continual dataset ready.')
 
     def train_next_class(self):
@@ -79,12 +83,16 @@ class ContinualDataset:
                 self.train_over = True
         
         if not self.train_over:
+            self.train_iteration += 1
+            if self.train_iteration == self.args.num_rounds: self.train_iteration = 0
+
             self.active_train_loaders = [
-                self.train_loaders[self.train_classes[0]],
-                self.train_loaders[self.train_classes[1]]]
+                self.train_loaders[self.train_classes[0]][self.train_iteration],
+                self.train_loaders[self.train_classes[1]].pop()]
+
             self.active_remaining_training_items = [
-                self.remaining_training_items[self.train_classes[0]],
-                self.remaining_training_items[self.train_classes[1]]]
+                self.remaining_training_items[self.train_classes[0]][self.train_iteration],
+                self.remaining_training_items[self.train_classes[1]].pop()]
 
     def init_data_loaders(self, data_set, data_paths):
         """
@@ -93,15 +101,17 @@ class ContinualDataset:
         # print('Initializing data loaders...')
         # Fill the train loaders
         for j in range(self.num_classes):
+            self.train_loaders.append([])
+            self.remaining_training_items.append([])
             mask = np.isin(np.array(self.train_dataset.tensors[1]), [j])
             for k in range(self.args.num_rounds):
                 samples_per_batch = mask.sum() // (self.args.num_rounds) + 1
                 masked_dataset = TensorDataset(
                     self.train_dataset.tensors[0][mask][k * samples_per_batch:(k+1) * samples_per_batch], 
                     self.train_dataset.tensors[1][mask][k * samples_per_batch:(k+1) * samples_per_batch])
-                self.train_loaders.append(DataLoader(
+                self.train_loaders[-1].append(DataLoader(
                     masked_dataset, batch_size=1, shuffle=True))
-                self.remaining_training_items.append(
+                self.remaining_training_items[-1].append(
                     masked_dataset.tensors[0].shape[0])
         
         # Fill the test loaders
@@ -115,6 +125,8 @@ class ContinualDataset:
 
     def get_train_data(self):
         assert not self.train_over
+
+        k = 0
 
         batch_size_0 = min(int(round(self.active_remaining_training_items[0] /
                                      (self.active_remaining_training_items[0] +
@@ -139,7 +151,7 @@ class ContinualDataset:
         self.active_remaining_training_items[0] -= batch_size_0
         self.active_remaining_training_items[1] -= batch_size_1
 
-        # print(self.active_remaining_training_items[0])
+        print(self.active_remaining_training_items[0], self.active_remaining_training_items[1])
         if self.active_remaining_training_items[0] <= 0 or self.active_remaining_training_items[1] <= 0:
             self.train_next_class()
         
@@ -233,7 +245,7 @@ def load_data(dset, data_path, include_categorical=True):
 
             for df in reader:
                 # Process the features and labels
-                features, labels = process_features(dset, df, include_categorical)
+                features, labels = process_features(dset, df.sample(frac=0.1), include_categorical)
 
                 # Convert dataframe to numpy array for processing
                 data_np = np.array(features.to_numpy(), dtype=float)
@@ -258,7 +270,7 @@ def load_data(dset, data_path, include_categorical=True):
         # Save histogram of cleaned data
         axs = pd.DataFrame(all_features, columns=features.columns.values.tolist()).hist(figsize=(30,30))
         plt.tight_layout()
-        plt.savefig(os.path.join('./figures/', f'hist_{dset}.png'))
+        plt.savefig(os.path.join('./out/', f'hist_{dset}.png'))
 
         # Perform train/test split of 80-20
         features_train, features_test, labels_train, labels_test = train_test_split(all_features, all_labels, test_size=0.2)

@@ -4,7 +4,7 @@ import time
 import csv
 import math
 import copy
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import numpy as np
 import pandas as pd
@@ -277,24 +277,33 @@ def eval(model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01
         return ave_f1_score, top1_acc, report
 
 
-def train_continual(model, dataset, out_path, args):
+def train_continual(model, dataset, out_path, counter, args):
     print('\nTraining phase')
     print('Current malicious class:',  list(dataset.label_mapping.keys())[dataset.train_classes[1]])
     model.net.to(model.device)
 
     model.net.train()
-    epoch, i = 0, 0
+    i = 0
     start = time.time()
     while not dataset.train_over:
+        if i == 0:
+            max_progress = (sum(dataset.active_remaining_training_items) // args.batch_size) - 1
+        if not (i + 1) % max_progress:
+            i = 0
         inputs, labels = dataset.get_train_data()
         inputs, labels = inputs.to(model.device), labels.to(model.device)
         loss = model.observe(inputs.float(), labels)
-        progress_bar(i, len(dataset.train_dataset) // args.batch_size, epoch, 'C', loss)
+        progress_bar(i, max_progress, dataset.completed_rounds + 1, 'C', loss)
         i += 1
     time_elapsed = time.time() - start
-    print(f'{time_elapsed / 60} min')
+    print(f'Training complete in {timedelta(seconds=round(time_elapsed))}')
 
-    torch.save(model.state_dict(), os.path.join(out_path, 'model.pt'))
+    with open(os.path.join(out_path, f'log_{counter}.txt'), 'a') as file:
+        file.write(f'\nTraining complete in {timedelta(seconds=round(time_elapsed))}')
+
+    torch.save(model.state_dict(), os.path.join(out_path, f'model_{counter}.pt'))
+
+    eval_continual(model, dataset, out_path, counter)
 
 def eval_continual(model, dataset, out_path, counter):
     print('\nEvaluation phase')
@@ -326,14 +335,14 @@ def eval_continual(model, dataset, out_path, counter):
     
     return report
 
-def progress_bar(i, max_iter, epoch, task_number, loss):
+def progress_bar(i, max_iter, rounds, task_number, loss):
     if not (i + 1) % 10 or (i + 1) == max_iter:
         progress = min(float((i + 1) / max_iter), 1)
         progress_bar = ('█' * int(50 * progress)) + ('┈' * (50 - int(50 * progress)))
-        print('\r[ {} ] Task {} | epoch {}: |{}| loss: {}'.format(
+        print('\r[ {} ] Task {} | round {}: |{}| loss: {:.2e}\n'.format(
             datetime.now().strftime("%m-%d | %H:%M"),
             task_number + 1 if isinstance(task_number, int) else task_number,
-            epoch,
+            rounds,
             progress_bar,
-            round(loss, 8)
+            loss
         ), file=sys.stderr, end='', flush=True)
