@@ -18,7 +18,7 @@ class FocalLoss(nn.Module):
     """
 
     def __init__(self,
-                 alpha: Optional[Tensor] = None,
+                 beta: Optional[Tensor] = None,
                  gamma: float = 0.,
                  reduction: str = 'mean',
                  ignore_index: int = -100):
@@ -37,13 +37,13 @@ class FocalLoss(nn.Module):
                 'Reduction must be one of: "mean", "sum", "none".')
 
         super().__init__()
-        self.alpha = alpha
+        self.alpha = beta
         self.gamma = gamma
         self.ignore_index = ignore_index
         self.reduction = reduction
 
         self.nll_loss = nn.NLLLoss(
-            weight=alpha, reduction='none', ignore_index=ignore_index)
+            weight=beta, reduction='none', ignore_index=ignore_index)
 
     def __repr__(self):
         arg_keys = ['alpha', 'gamma', 'ignore_index', 'reduction']
@@ -118,7 +118,7 @@ def focal_loss(alpha: Optional[Sequence] = None,
         alpha = alpha.to(device=device, dtype=dtype)
 
     fl = FocalLoss(
-        alpha=alpha,
+        beta=alpha,
         gamma=gamma,
         reduction=reduction,
         ignore_index=ignore_index)

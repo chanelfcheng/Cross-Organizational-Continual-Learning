@@ -38,26 +38,26 @@ def train_mlp(args):
         test_path = CIC_PATH
     
     ttd = TrainTestDataset(train_set, train_classes, train_path, test_set, test_classes, test_path, include_categorical)
-    train = 'train'
-    test = 'test'
+    train_idx = 'train'
+    test_idx = 'test'
 
     # Load dataset
     print('\nLoading dataset...')
     dataset_train, dataset_test = ttd.get_pytorch_dataset(arch=args.arch)
-    datasets = {train: dataset_train, test: dataset_test}
+    datasets = {train_idx: dataset_train, test_idx: dataset_test}
     print(f'Dataset classes: {np.unique(ttd.labels_train)}\n')
 
     samplers = {}
-    samplers[train] = RandomSampler(datasets[train])
-    samplers[test] = SequentialSampler(datasets[test])
+    samplers[train_idx] = RandomSampler(datasets[train_idx])
+    samplers[test_idx] = SequentialSampler(datasets[test_idx])
 
     dataloaders = {x: torch.utils.data.DataLoader(datasets[x],
-                                                  batch_size=args.batch_size if x == train else 1028,
+                                                  batch_size=args.batch_size if x == train_idx else 1028,
                                                   sampler=samplers[x],
                                                   num_workers=20)
-                   for x in [train, test]}
-    dataset_sizes = {x: len(datasets[x]) for x in [train, test]}
-    class_names = datasets[train].classes.copy()
+                   for x in [train_idx, test_idx]}
+    dataset_sizes = {x: len(datasets[x]) for x in [train_idx, test_idx]}
+    class_names = datasets[train_idx].classes.copy()
     num_classes = len(class_names)
 
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
@@ -90,7 +90,7 @@ def train_mlp(args):
     lr_scheduler = optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=args.lr_patience)
 
     # Could make this a command line argument
-    eval_batch_freq = len(dataloaders[train]) // 5
+    eval_batch_freq = len(dataloaders[train_idx]) // 5
     print(f'Evaluation will be performed every {eval_batch_freq} batches.\n')
 
     out_path = os.path.join('./out/', name)
@@ -106,7 +106,7 @@ def train_mlp(args):
         file.write('BATCH_SIZE: %d\n' % args.batch_size)
 
     trained_model = train(model, criterion, optimizer,
-                           lr_scheduler, args.lr_patience, dataloaders, device, eval_batch_freq, out_path, train, test,
+                           lr_scheduler, args.lr_patience, dataloaders, device, eval_batch_freq, out_path, train_idx, test_idx,
                            n_epochs=args.n_epochs)
     
     return trained_model
@@ -114,13 +114,12 @@ def train_mlp(args):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('--arch', type=str, required=True, choices=ARCHITECTURES, help='The model architecture')
-    parser.add_argument('--exp', type=str, required=True, choices=['train-test-cic-usb', 'train-test-usb-cic'], help='The experimental setup for transfer learning')
+    parser.add_argument('--exp', type=str, required=True, choices=['train-test-cic-usb', 'train-test-usb-cic, train-test-hulk-slowhttptest'], help='The experimental setup for transfer learning')
     parser.add_argument('--categorical', default=True, help='Option to include or not include categorical features in the model')
     parser.add_argument('--n-epochs', type=int, default=10, help='Number of epochs to train')
     parser.add_argument('--batch-size', type=int, default=64, help='Number of samples per training batch')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate during training')
     parser.add_argument('--lr-patience', type=int, default=3, help='Determines patience tolerance for reducing learning rate when learning stagnates. Higher means waiting longer before learning rate is reduced')
-    parser.add_argument('--pretrained-path', type=str, default='', help='Path to the pretrained model to transfer weights from')
 
     args = parser.parse_args()
 

@@ -18,11 +18,12 @@ USB_2021 = 'usb-2021'
 # Classes (benign is always first)
 CIC_CLASSES = ['Benign', 'DoS-Hulk', 'DoS-Slowloris', 'DoS-SlowHttpTest', 'DoS-GoldenEye']
 USB_CLASSES = ['Benign', 'DoS-Hulk', 'DoS-Slowloris', 'DoS-SlowHttpTest', 'DoS-TCPFlood']
+UNKNOWN = ['Unknown']
 
 # Data paths
 # TODO: Change this to reflect your local path to the data files
 data_path = os.path.abspath(os.path.join(os.getcwd(), os.pardir, 'data/'))
-CIC_PATH = os.path.join(data_path, 'CIC-IDS2018/DoS')
+CIC_PATH = os.path.join(data_path, 'CIC-IDS2018')
 USB_PATH = os.path.join(data_path, 'USB-IDS2021')
 
 # Pickle paths

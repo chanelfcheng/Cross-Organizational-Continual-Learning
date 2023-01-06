@@ -102,6 +102,10 @@ def train(model, criterion, optimizer, scheduler, patience, dataloaders, device,
                     if (idx + 1) % eval_batch_freq == 0 and eval_batch_freq > 0:
                         eval_f1, eval_acc, report = eval(model, dataloaders[test], device, out_path=out_path)
                         
+                        # Save results
+                        with open(os.path.join(out_path, 'report1.txt'), 'a') as file:
+                            file.write(f'\n{report}')
+                        
                         # Update best f1 score
                         if eval_f1 > best_f1:
                             best_f1 = eval_f1
@@ -111,10 +115,6 @@ def train(model, criterion, optimizer, scheduler, patience, dataloaders, device,
 
                             # Save best model
                             torch.save(model.state_dict(), os.path.join(out_path, 'model_epoch_%d.pt' % epoch))
-
-                            # Save best results
-                            with open(os.path.join(out_path, 'report.txt'), 'w') as file:
-                                file.write(report)
                         
                         # Update best accuracy
                         if eval_acc > best_acc:
@@ -290,6 +290,19 @@ def train_continual(model, dataset, out_path, counter, args):
             max_progress = sum(dataset.active_remaining_training_items) // args.batch_size
         
         if not (i + 1) % (max_progress + 1):
+            eval_continual(model, dataset, out_path, counter)
+
+            for key in model.buffer.buffer_content:
+                model.buffer.buffer_content[key] = (model.buffer.buffer_content[key] // (model.buffer.batch_count)) / args.batch_size
+
+            print(model.buffer.buffer_content)
+            print(model.buffer.batch_count)
+            
+            model.buffer.batch_count = 0
+
+            for key in model.buffer.buffer_content:
+                model.buffer.buffer_content[key] = 0
+
             i = 0
         else:
             i += 1
@@ -313,6 +326,8 @@ def train_continual(model, dataset, out_path, counter, args):
 def eval_continual(model, dataset, out_path, counter):
     print('\nEvaluation phase')
     model.net.eval()
+    dataset.test_over = False
+    dataset.test_class = 0
     start_test = True
     
     while not dataset.test_over:

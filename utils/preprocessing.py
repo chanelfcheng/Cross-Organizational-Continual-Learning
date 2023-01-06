@@ -9,6 +9,15 @@ from imblearn.over_sampling import RandomOverSampler
 from imblearn.under_sampling import RandomUnderSampler
 from tqdm import tqdm
 
+"""
+TODO: ideas to reprocess data for multiple benign and 1 malicious labels
+ideas: 
+1. check if label is benign
+2. if label is benign and protocol is X, rename label to Benign-X
+3. if label is not benign, rename to Malicious
+4. process same way as before and make pickles
+"""
+
 # Encoder for protocol feature
 ohe1 = OneHotEncoder(sparse=False)
 ohe1.fit(np.array(['0', '6', '17']).reshape(-1,1))  # Most common protocols
@@ -29,7 +38,7 @@ def process_features(dset, df, include_categorical):
     print('\nProcessing features...')
     rename_labels(df)
 
-    attack = df.loc[df['Label'].str.contains('hulk|slowloris|slowhttptest|tcpflood|goldeneye', case=False)].copy()  # Get attack types
+    attack = df.loc[df['Label'].str.contains('hulk|slowloris|slowhttptest|tcpflood|goldeneye|unknown', case=False)].copy()  # Get attack types
     benign = df.loc[df['Label'].str.contains('benign', case=False)].copy()  # Get all benign traffic
 
     features = pd.concat([attack, benign]).drop(['Label'], axis=1)  # Concatenate attack/benign and separate label from features
@@ -88,6 +97,8 @@ def rename_labels(df):
     df.loc[df['Label'].str.contains('slowhttptest', case=False), 'Label'] = 'DoS-SlowHttpTest'
     df.loc[df['Label'].str.contains('tcpflood', case=False), 'Label'] = 'DoS-TCPFlood'
     df.loc[df['Label'].str.contains('goldeneye', case=False), 'Label'] = 'DoS-GoldenEye'
+    df.loc[df['Label'].str.contains('ftp', case=False), 'Label'] = 'Unknown'
+    df.loc[df['Label'].str.contains('ssh', case=False), 'Label'] = 'Unknown'
 
 def map_ports(features, feature_name):
     """

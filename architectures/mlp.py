@@ -8,6 +8,7 @@ class MLP(nn.Module):
         super().__init__()
 
         self.num_in_features = num_features
+        self.num_classes = num_classes
         self.embeddings = embeddings
 
         self.layer1 = nn.Linear(num_features, 100)

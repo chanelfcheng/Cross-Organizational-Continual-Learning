@@ -11,9 +11,9 @@ from argparse import Namespace
 
 from architectures import ARCHITECTURES
 from architectures.mlp import MLP
-from datasets import CIC_2018, USB_2021, CIC_CLASSES, USB_CLASSES, CIC_PATH, USB_PATH, get_support
+from datasets import CIC_2018, USB_2021, CIC_CLASSES, USB_CLASSES, UNKNOWN, CIC_PATH, USB_PATH, get_support
 from datasets.continual_dataset import ContinualDataset
-from utils.random_buffer import Buffer
+from utils.buffer import Buffer, ModifiedBuffer
 from utils.focal_loss import FocalLoss
 from utils.train_eval import train_continual
 from utils import create_if_not_exists
@@ -59,12 +59,12 @@ class Er(ContinualModel):
 
     def __init__(self, architecture, criterion, optimizer, args):
         super(Er, self).__init__(architecture, criterion, optimizer, args)
-        self.buffer = Buffer(self.args.buffer_size, self.device)
+        self.buffer = ModifiedBuffer(self.args.buffer_size, self.args.sampling_threshold, self.device) if self.args.buffer_strategy == 'uncertainty' \
+            else Buffer(self.args.buffer_size, self.device)
 
     def observe(self, inputs, labels):
-
-        self.buffer.add_data(examples=inputs,
-                             labels=labels)
+        self.buffer.add_data(self.net, examples=inputs,labels=labels) if self.args.buffer_strategy == 'uncertainty' \
+        else self.buffer.add_data(examples=inputs, labels=labels)
 
         self.opt.zero_grad()
         if not self.buffer.is_empty():
@@ -79,11 +79,13 @@ class Er(ContinualModel):
             #         support[label] += 1
             # print(support)
 
-            inputs = torch.cat((inputs, buf_inputs))
-            labels = torch.cat((labels, buf_labels))
+            # inputs = torch.cat((inputs, buf_inputs))
+            # labels = torch.cat((labels, buf_labels))
 
-        outputs = self.net(inputs)
-        loss = self.loss(outputs, labels)
+        # outputs = self.net(inputs)
+        # loss = self.loss(outputs, labels)
+        outputs = self.net(buf_inputs)
+        loss = self.loss(outputs, buf_labels)
         loss.backward()
         self.opt.step()
 
@@ -96,7 +98,8 @@ class Der(ContinualModel):
 
     def __init__(self, architecture, criterion, optimizer, args):
         super(Der, self).__init__(architecture, criterion, optimizer, args)
-        self.buffer = Buffer(self.args.buffer_size, self.device)
+        self.buffer = ModifiedBuffer(self.args.buffer_size, self.args.sampling_threshold, self.device) if self.args.buffer_strategy == 'uncertainty' \
+            else Buffer(self.args.buffer_size, self.device)
 
     def observe(self, inputs, labels):
 
@@ -113,7 +116,8 @@ class Der(ContinualModel):
 
         loss.backward()
         self.opt.step()
-        self.buffer.add_data(examples=inputs, logits=outputs.data)
+        self.buffer.add_data(self.net, examples=inputs, logits=outputs.data) if self.args.buffer_strategy == 'uncertainty' \
+            else self.buffer.add_data(examples=inputs, labels=labels)
 
         return loss.item()
     
@@ -123,15 +127,15 @@ def train_mlp(args):
 
     if args.exp == 'continual-cic':
         dataset_names = [CIC_2018]
-        classes = CIC_CLASSES
+        classes = CIC_CLASSES + UNKNOWN
         dataset_paths = [CIC_PATH]
     if args.exp == 'continual-usb':
         dataset_names = [USB_2021]
-        classes = USB_CLASSES
+        classes = USB_CLASSES + UNKNOWN
         dataset_paths = [USB_PATH]
     if args.exp == 'continual-cic-usb':
         dataset_names = [CIC_2018, USB_2021]
-        classes = list(dict.fromkeys(CIC_CLASSES + USB_CLASSES))
+        classes = list(dict.fromkeys(CIC_CLASSES + USB_CLASSES + UNKNOWN))
         dataset_paths = [CIC_PATH, USB_PATH]
     
     dataset = ContinualDataset(dataset_names, classes, dataset_paths, args)
@@ -150,7 +154,7 @@ def train_mlp(args):
 
     # Initialize model
     architecture = MLP(88 if include_categorical else 76, dataset.num_classes)
-    criterion = FocalLoss(alpha=weights, gamma=args.gamma)
+    criterion = FocalLoss(beta=weights, gamma=args.gamma)
     # criterion = nn.CrossEntropyLoss()
     optimizer = optim.RAdam(architecture.parameters(), lr=args.lr)
     # optimizer = SGD(architecture.parameters(), lr=args.lr)
@@ -158,6 +162,8 @@ def train_mlp(args):
         model = Der(architecture, criterion, optimizer, args)
     else:
         model = Er(architecture, criterion, optimizer, args)
+        for key in range(dataset.num_classes):
+            model.buffer.buffer_content[key] = 0
 
     out_path = os.path.join('./out/', name)
     create_if_not_exists(out_path)
@@ -174,6 +180,7 @@ def train_mlp(args):
         file.write('BATCH_SIZE: %d\n' % args.batch_size)
         file.write('MINIBATCH_SIZE: %d\n' % args.minibatch_size)
         file.write('BUFFER_SIZE: %d\n' % args.buffer_size)
+        file.write('BUFFER_STRATEGY: %s\n' % args.buffer_strategy)
         if args.alpha > 0: file.write('ALPHA: %f\n' % args.alpha)
         file.write('GAMMA: %f\n' % args.gamma)
         file.write('LR: %e\n' % args.lr)
@@ -190,8 +197,10 @@ def main():
     parser.add_argument('--batch-size', type=int, default=64, help='Number of samples per batch')
     parser.add_argument('--minibatch-size', type=int, default=256, help='Number of samples per minibatch')
     parser.add_argument('--buffer-size', type=int, default=1000, help='Maximum number of samples the buffer can hold')
+    parser.add_argument('--buffer-strategy', type=str, default='uncertainty', help='Strategy to use for sampling to the buffer')
     parser.add_argument('--alpha', type=float, default=-1, help='Balance parameter for balancing trade-off between past and current samples')
     parser.add_argument('--gamma', type=float, default=2, help='Focus parameter for focal loss')
+    parser.add_argument('--sampling-threshold', type=float, default=0.8, help='Probability threshold for sampling to the buffer')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate during training')
 
     args = parser.parse_args()

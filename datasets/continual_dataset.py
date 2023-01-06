@@ -69,50 +69,31 @@ class ContinualDataset:
             self.remaining_training_items[self.train_classes[1]].pop()]
         # print('Continual dataset ready.')
 
-    def train_next_class(self):
-        """
-        Changes the current pair of training classes by shifting the second class only while leaving the first class the same. If all classes have been visited, recycle through again until all rounds have been completed.
-        """
-        self.train_classes[1] += 1
-        if self.train_classes[1] == self.num_classes: self.train_classes[1] = 1
-        print('\nCurrent malicious class:', list(self.label_mapping.keys())[self.train_classes[1]])
-
-        if self.train_classes[1] == 1:
-            self.completed_rounds += 1
-            if self.completed_rounds == self.args.num_rounds:
-                self.train_over = True
-        
-        if not self.train_over:
-            self.train_iteration += 1
-            if self.train_iteration == self.args.num_rounds: self.train_iteration = 0
-
-            self.active_train_loaders = [
-                self.train_loaders[self.train_classes[0]][self.train_iteration],
-                self.train_loaders[self.train_classes[1]].pop()]
-
-            self.active_remaining_training_items = [
-                self.remaining_training_items[self.train_classes[0]][self.train_iteration],
-                self.remaining_training_items[self.train_classes[1]].pop()]
-
     def init_data_loaders(self, data_set, data_paths):
         """
         Initializes the data loaders.
         """
         # print('Initializing data loaders...')
         # Fill the train loaders
-        for j in range(self.num_classes):
-            self.train_loaders.append([])
-            self.remaining_training_items.append([])
-            mask = np.isin(np.array(self.train_dataset.tensors[1]), [j])
-            for k in range(self.args.num_rounds):
-                samples_per_batch = mask.sum() // (self.args.num_rounds) + 1
+        for k in range(self.args.num_rounds):
+        # for j in range(self.num_classes):
+            # for k in range(self.args.num_rounds): # num_rounds is how many
+            # rounds to train in one epoch of dataset
+            for j in range(self.num_classes):
+                self.train_loaders.append([])
+                self.remaining_training_items.append([])
+                mask = np.isin(np.array(self.train_dataset.tensors[1]), [j])
+                samples_per_iteration = 10000
                 masked_dataset = TensorDataset(
-                    self.train_dataset.tensors[0][mask][k * samples_per_batch:(k+1) * samples_per_batch], 
-                    self.train_dataset.tensors[1][mask][k * samples_per_batch:(k+1) * samples_per_batch])
-                self.train_loaders[-1].append(DataLoader(
-                    masked_dataset, batch_size=1, shuffle=True))
-                self.remaining_training_items[-1].append(
-                    masked_dataset.tensors[0].shape[0])
+                    self.train_dataset.tensors[0][mask][k * samples_per_iteration:(k+1) * samples_per_iteration], 
+                    self.train_dataset.tensors[1][mask][k * samples_per_iteration:(k+1) * samples_per_iteration])
+                # print(masked_dataset.tensors[1][:10])
+                # print(masked_dataset.tensors[1].shape)
+                if len(masked_dataset) != 0:
+                    self.train_loaders[-1].append(DataLoader(
+                        masked_dataset, batch_size=1, shuffle=True))
+                    self.remaining_training_items[-1].append(
+                        masked_dataset.tensors[0].shape[0])
         
         # Fill the test loaders
         for j in range(self.num_classes):
@@ -122,6 +103,36 @@ class ContinualDataset:
                     self.test_dataset.tensors[1][mask])
             self.test_loaders.append(DataLoader(masked_dataset,
                             batch_size=self.args.batch_size, shuffle=True))
+
+    def train_next_class(self):
+        """
+        Changes the current pair of training classes by shifting the second class only while leaving the first class the same. If all classes have been visited, recycle through again until all rounds have been completed.
+        """
+        self.train_classes[1] += 1
+        if self.train_classes[1] % self.num_classes == 0:
+            self.train_classes[1] += 1
+            self.train_classes[0] += self.num_classes
+            self.completed_rounds += 1
+            if self.completed_rounds == self.args.num_rounds:
+                self.train_over = True
+                
+        print('\nCurrent malicious class:', list(self.label_mapping.keys())[self.train_classes[1]%self.num_classes])
+
+        # if self.train_classes[1] == 1:
+        #     self.completed_rounds += 1
+        #     if self.completed_rounds == self.args.num_rounds:
+        #         self.train_over = True
+        
+        if not self.train_over:
+            # print(len(self.train_loaders[self.train_classes[0]]))
+            # quit()
+            self.active_train_loaders = [
+                self.train_loaders[self.train_classes[0]][0],
+                self.train_loaders[self.train_classes[1]].pop()]
+
+            self.active_remaining_training_items = [
+                self.remaining_training_items[self.train_classes[0]][0],
+                self.remaining_training_items[self.train_classes[1]].pop()]
 
     def get_train_data(self):
         assert not self.train_over
