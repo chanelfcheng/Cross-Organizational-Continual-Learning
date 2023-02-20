@@ -18,19 +18,6 @@ def reservoir(num_seen_examples: int, buffer_size: int) -> int:
     else:
         return -1
 
-def uncertainty_reservoir(model, sampling_threshold, current_input: torch.tensor):
-    outputs = model(current_input.float())
-    probabilities = torch.nn.functional.softmax(outputs, dim=0) # [0.1 0.2 0.2 0.1]
-    max_prob, _ = torch.max(probabilities, 0)
-
-    if max_prob < sampling_threshold: # sampling threshold (slightly uncertain)
-        return 1
-    elif max_prob < 0.3: # minimum threshold (highly uncertain)
-        return 2
-    else:
-        return 0 # wow i am so confident that i don't need to sample this
-
-
 class Buffer:
     def __init__(self, buffer_size, device):
         self.buffer_size = buffer_size
@@ -112,6 +99,7 @@ class ModifiedBuffer:
         self.attributes = ['examples', 'labels', 'logits']
         self.buffer_content = {}
         self.batch_count = 1
+        self.sample_count = 0
 
     def __len__(self):
         return min(self.num_examples, self.buffer_size)
@@ -124,12 +112,22 @@ class ModifiedBuffer:
                 setattr(self, attr_str, torch.zeros((self.buffer_size,
                         *attr.shape[1:]), dtype=typ, device=self.device))
 
+    def uncertainty_reservoir(self, model, sampling_threshold, current_input: torch.tensor):
+        outputs = model(current_input.float())
+        p = torch.softmax(outputs, dim=0)
+        max_p, _ = torch.max(p, 0)
+
+        if max_p < sampling_threshold: # sampling threshold (for seen classes)
+            return 1 # model is uncertain about this sample's class
+        else:
+            return 0 # wow i am so confident that i don't need to sample this
+
     def add_data(self, model, examples, labels=None, logits=None):
         if not hasattr(self, 'examples'):
             self.init_tensors(examples, labels, logits)
         
         for i in range(examples.shape[0]):
-            uncertain = uncertainty_reservoir(model, self.sampling_threshold, examples[i])
+            uncertain = self.uncertainty_reservoir(model, self.sampling_threshold, examples[i])
             index = np.random.randint(0, self.num_examples) if self.num_examples > 0 else 0
             if uncertain != 0:
                 if self.num_examples < self.buffer_size:
@@ -144,7 +142,7 @@ class ModifiedBuffer:
                 self.examples[index] = examples[i].to(self.device)
                         
                 if labels is not None:
-                    self.labels[index] = labels[i].to(self.device) if uncertain == 1 else model.net.num_classes-1
+                    self.labels[index] = labels[i].to(self.device)
                     if self.labels[index].item() not in self.buffer_content:
                         self.buffer_content[self.labels[index].item()] = 1
                     else:
@@ -154,6 +152,8 @@ class ModifiedBuffer:
 
                 if logits is not None:
                     self.logits[index] = logits[i].to(self.device)
+            
+            self.sample_count += 1
         
         self.batch_count += 1
 

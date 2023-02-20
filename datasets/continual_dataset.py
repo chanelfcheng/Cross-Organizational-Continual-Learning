@@ -1,7 +1,8 @@
 import os
-import copy
 import glob
 import pickle
+from collections import namedtuple
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -11,8 +12,11 @@ from torch.utils.data import TensorDataset, DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
 
-from datasets import PKL_PATH
 from utils.preprocessing import process_features, remove_invalid, resample_data
+from utils import create_if_not_exists
+
+PKL_PATH = './pickle/continual/'
+create_if_not_exists(PKL_PATH)
 
 class ContinualDataset:
     """
@@ -21,9 +25,15 @@ class ContinualDataset:
     SETTING = 'General Continual Learning'
     NAME = 'IDS'
 
-    def __init__(self, dataset_names, classes, dataset_paths, args):
+    def __init__(self, args):
         # Set initial variables
-        self.num_classes = len(classes)
+        self.dataset_names = args.dataset_names.split(',')
+        self.dataset_paths = args.dataset_paths.split(',')
+        self.dataset_classes = args.dataset_classes.split(',')
+        self.rename_labels = args.rename_labels.split(',')
+
+        self.classes = list(dict.fromkeys(self.rename_labels))
+        self.num_classes = len(self.classes)
         self.args = args
 
         self.train_over, self.test_over = False, False
@@ -36,14 +46,13 @@ class ContinualDataset:
         # Get label mapping
         self.label_mapping = {}
         for i in range(self.num_classes):
-            self.label_mapping[classes[i]] = i
-        self.classes = list(self.label_mapping.keys())
+            self.label_mapping[self.classes[i]] = i
         
         # Load the data
-        self.features_train, self.features_test, self.labels_train, self.labels_test = load_data(dataset_names[0] + '-continual', dataset_paths[0], self.args.categorical)
-        if len(dataset_names) > 1:
-            for i in range(1, len(dataset_names)):
-                features_train, features_test, labels_train, labels_test = load_data(dataset_names[i] + '-continual', dataset_paths[i], self.args.categorical)
+        self.features_train, self.features_test, self.labels_train, self.labels_test = self.__load_data(self.dataset_names[0] + '_' + self.args.exp_name, self.dataset_paths[0], self.args.categorical)
+        if len(self.dataset_names) > 1:
+            for i in range(1, len(self.dataset_names)):
+                features_train, features_test, labels_train, labels_test = self.__load_data(self.dataset_names[i] + '_' + self.args.exp_name, self.dataset_paths[i], self.args.categorical)
                 self.features_train = np.concatenate([self.features_train, features_train])
                 self.features_test = np.concatenate([self.features_test, features_test])
                 self.labels_train = np.concatenate([self.labels_train, labels_train]).tolist()
@@ -51,13 +60,13 @@ class ContinualDataset:
 
         # Resample training data
         print('\nResampling training data...')
-        self.features_train, self.labels_train = resample_data('continual', self.features_train, self.labels_train)
+        self.features_train, self.labels_train = resample_data(self.args.exp_name, self.features_train, self.labels_train)
 
         # Get train and test datasets
         self.train_dataset, self.test_dataset = self.get_pytorch_datasets(self.args.arch) 
 
         # Initialize the data loaders
-        self.init_data_loaders(dataset_names, dataset_paths)
+        self.init_data_loaders()
 
         # Set active data loaders
         self.active_train_loaders = [
@@ -69,7 +78,7 @@ class ContinualDataset:
             self.remaining_training_items[self.train_classes[1]].pop()]
         # print('Continual dataset ready.')
 
-    def init_data_loaders(self, data_set, data_paths):
+    def init_data_loaders(self):
         """
         Initializes the data loaders.
         """
@@ -127,11 +136,11 @@ class ContinualDataset:
             # print(len(self.train_loaders[self.train_classes[0]]))
             # quit()
             self.active_train_loaders = [
-                self.train_loaders[self.train_classes[0]][0],
+                self.train_loaders[self.train_classes[0]][self.train_iteration],
                 self.train_loaders[self.train_classes[1]].pop()]
 
             self.active_remaining_training_items = [
-                self.remaining_training_items[self.train_classes[0]][0],
+                self.remaining_training_items[self.train_classes[0]][self.train_iteration],
                 self.remaining_training_items[self.train_classes[1]].pop()]
 
     def get_train_data(self):
@@ -229,69 +238,84 @@ class ContinualDataset:
 
         return train_dataset, test_dataset
 
-def load_data(dset, data_path, include_categorical=True):
-    """
-    Loads in dataset from a folder containing all the data files. Processes
-    features, replaces invalid values, and concatenates all data files into a
-    single dataset. Splits dataset into train (.80) and test (.20) sets
-    :param dset: name of the dataset
-    :param data_path: path to the folder containing the data files
-    :param include_categorical: option to include categorical features
-    :param resample: option to resample the data to reduce class imbalance
-    :return: the training features, training labels, test features, and test labels
-    """
-    # Define variables to store all features, labels, and invalid count after concatenation
-    all_features = np.array([])
-    all_labels = []
-    all_invalid = 0
+    def __map_labels(self, df):
+        """
+        Maps label names to be consistent across datasets.
+        :param df: The dataframe for which the labels will be renamed
+        """
+        df = df.loc[df['Label'].str.contains('|'.join(self.dataset_classes), case=False)].copy()
 
-    # Check if pre-processed pickle file exists
-    if os.path.exists(os.path.join(PKL_PATH, f'{dset}.pkl')): 
-        with open(os.path.join(PKL_PATH, f'{dset}.pkl'), 'rb') as file:
-            features_train, features_test, labels_train, labels_test = pickle.load(file)  # Load data from pickle file
-    else:
-        for file in list(glob.glob(os.path.join(f'{data_path}', '*.csv'))):
-            print('\nLoading', file, '...')
-            reader = pd.read_csv(file, dtype=str, chunksize=10**6, skipinitialspace=True)  # Read in data from csv file
-
-            for df in reader:
-                # Process the features and labels
-                features, labels = process_features(dset, df.sample(frac=0.1), include_categorical)
-
-                # Convert dataframe to numpy array for processing
-                data_np = np.array(features.to_numpy(), dtype=np.float32)
-                labels_lst = labels.tolist()
-
-                data_np, labels_lst, num_invalid = remove_invalid(data_np, labels_lst)  # Clean data of invalid values
-
-                # Combine all data, labels, and number of invalid values
-                if all_features.size == 0:
-                    all_features = data_np  # If no data yet, set all data to current data
-                else:
-                    all_features = np.concatenate((all_features, data_np))  # Else, concatenate data
-                all_labels += labels_lst
-                all_invalid += num_invalid
-
-        # Print total number of invalid values dropped, total number of data
-        # values, and total percentage of invalid data
-        print('\nTotal Number of invalid values: %d' % all_invalid)
-        print('Total Data values: %d' % len(all_labels))
-        print('Invalid data: %.2f%%' % (all_invalid / float(all_features.size) * 100))
-
-        # Save histogram of cleaned data
-        axs = pd.DataFrame(all_features, columns=features.columns.values.tolist()).hist(figsize=(30,30))
-        plt.tight_layout()
-        plt.savefig(os.path.join('./out/', f'hist_{dset}.png'))
-
-        # Perform train/test split of 80-20
-        features_train, features_test, labels_train, labels_test = train_test_split(all_features, all_labels, test_size=0.2)
-
-        # # Resample training data
-        # print('\nResampling training data...')
-        # features_train, labels_train = resample_data(dset, features_train, labels_train)
+        for i in range(len(self.rename_labels)):
+            df.loc[df['Label'].str.contains(self.dataset_classes[i], case=False), 'Label'] = self.rename_labels[i]
         
-        # Save to pickle file
-        with open(os.path.join(PKL_PATH, f'{dset}.pkl'), 'wb') as file:
-            pickle.dump((features_train, features_test, labels_train, labels_test), file)
-        
-    return features_train, features_test, labels_train, labels_test
+        return df
+
+    def __load_data(self, dset, data_path, include_categorical=True):
+        """
+        Loads in dataset from a folder containing all the data files. Processes
+        features, replaces invalid values, and concatenates all data files into a
+        single dataset. Splits dataset into train (.80) and test (.20) sets
+        :param dset: name of the dataset
+        :param data_path: path to the folder containing the data files
+        :param include_categorical: option to include categorical features
+        :param resample: option to resample the data to reduce class imbalance
+        :return: the training features, training labels, test features, and test labels
+        """
+        # Define variables to store all features, labels, and invalid count after concatenation
+        all_features = np.array([])
+        all_labels = []
+        all_invalid = 0
+
+        # Check if pre-processed pickle file exists
+        if os.path.exists(os.path.join(PKL_PATH, f'{dset}.pkl')): 
+            with open(os.path.join(PKL_PATH, f'{dset}.pkl'), 'rb') as file:
+                features_train, features_test, labels_train, labels_test = pickle.load(file)  # Load data from pickle file
+        else:
+            for file in list(glob.glob(os.path.join(f'{data_path}', '*.csv'))):
+                print('\nLoading', file, '...')
+                reader = pd.read_csv(file, dtype=str, chunksize=10**6, skipinitialspace=True)  # Read in data from csv file
+
+                for df in reader:
+                    # Map the labels for consistency
+                    df = self.__map_labels(df)
+
+                    # Process the features and labels
+                    features, labels = process_features(dset, df.sample(frac=0.1), include_categorical)
+
+                    # Convert dataframe to numpy array for processing
+                    data_np = np.array(features.to_numpy(), dtype=np.float32)
+                    labels_lst = labels.tolist()
+
+                    data_np, labels_lst, num_invalid = remove_invalid(data_np, labels_lst)  # Clean data of invalid values
+
+                    # Combine all data, labels, and number of invalid values
+                    if all_features.size == 0:
+                        all_features = data_np  # If no data yet, set all data to current data
+                    else:
+                        all_features = np.concatenate((all_features, data_np))  # Else, concatenate data
+                    all_labels += labels_lst
+                    all_invalid += num_invalid
+
+            # Print total number of invalid values dropped, total number of data
+            # values, and total percentage of invalid data
+            print('\nTotal Number of invalid values: %d' % all_invalid)
+            print('Total Data values: %d' % len(all_labels))
+            print('Invalid data: %.2f%%' % (all_invalid / float(all_features.size) * 100))
+
+            # Save histogram of cleaned data
+            axs = pd.DataFrame(all_features, columns=features.columns.values.tolist()).hist(figsize=(30,30))
+            plt.tight_layout()
+            plt.savefig(os.path.join('./out/', f'hist_{dset}.png'))
+
+            # Perform train/test split of 80-20
+            features_train, features_test, labels_train, labels_test = train_test_split(all_features, all_labels, test_size=0.2)
+
+            # # Resample training data
+            # print('\nResampling training data...')
+            # features_train, labels_train = resample_data(dset, features_train, labels_train)
+            
+            # Save to pickle file
+            with open(os.path.join(PKL_PATH, f'{dset}.pkl'), 'wb') as file:
+                pickle.dump((features_train, features_test, labels_train, labels_test), file)
+            
+        return features_train, features_test, labels_train, labels_test

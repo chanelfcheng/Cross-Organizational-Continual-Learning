@@ -36,13 +36,15 @@ def process_features(dset, df, include_categorical):
     :return: The features and their corresponding labels 
     """
     print('\nProcessing features...')
-    rename_labels(df)
 
-    attack = df.loc[df['Label'].str.contains('hulk|slowloris|slowhttptest|tcpflood|goldeneye|unknown', case=False)].copy()  # Get attack types
-    benign = df.loc[df['Label'].str.contains('benign', case=False)].copy()  # Get all benign traffic
+    # attack = df.loc[df['Label'].str.contains('attack', case=False)].copy()  # Get attack types
+    # benign = df.loc[df['Label'].str.contains('benign', case=False)].copy()  # Get all benign traffic
 
-    features = pd.concat([attack, benign]).drop(['Label'], axis=1)  # Concatenate attack/benign and separate label from features
-    labels = pd.concat([attack, benign])['Label']  # Save labels by themselves
+    # features = pd.concat([attack, benign]).drop(['Label'], axis=1)  # Concatenate attack/benign and separate label from features
+    # labels = pd.concat([attack, benign])['Label']  # Save labels by themselves
+
+    features = df.drop('Label', axis=1)  # Separate label from features
+    labels = df['Label']  # Save labels by themselves
 
     # Remove unused columns if present
     if 'Timestamp' in features:
@@ -86,19 +88,29 @@ def process_features(dset, df, include_categorical):
 
     return features, labels
 
-def rename_labels(df):
-    """
-    Renames label names to be consistent across datasets.
-    :param df: The dataframe for which the labels will be renamed
-    """
-    df.loc[df['Label'].str.contains('benign', case=False), 'Label'] = 'Benign'
-    df.loc[df['Label'].str.contains('hulk', case=False), 'Label'] = 'DoS-Hulk' 
-    df.loc[df['Label'].str.contains('slowloris', case=False), 'Label'] = 'DoS-Slowloris'
-    df.loc[df['Label'].str.contains('slowhttptest', case=False), 'Label'] = 'DoS-SlowHttpTest'
-    df.loc[df['Label'].str.contains('tcpflood', case=False), 'Label'] = 'DoS-TCPFlood'
-    df.loc[df['Label'].str.contains('goldeneye', case=False), 'Label'] = 'DoS-GoldenEye'
-    df.loc[df['Label'].str.contains('ftp', case=False), 'Label'] = 'Unknown'
-    df.loc[df['Label'].str.contains('ssh', case=False), 'Label'] = 'Unknown'
+# def rename_labels(df):
+#     """
+#     Renames label names to be consistent across datasets.
+#     :param df: The dataframe for which the labels will be renamed
+#     """
+#     #     df.loc[df['Label'].str.contains('benign', case=False), 'Label'] = 'Benign'
+#     #     df.loc[df['Label'].str.contains('hulk', case=False), 'Label'] = 'Attack-DoS-Hulk' 
+#     #     df.loc[df['Label'].str.contains('slowloris', case=False), 'Label'] = 'Attack-DoS-Slowloris'
+#     #     df.loc[df['Label'].str.contains('slowhttptest', case=False), 'Label'] = 'Attack-DoS-SlowHttpTest'
+#     #     df.loc[df['Label'].str.contains('goldeneye', case=False), 'Label'] = 'Attack-DoS-GoldenEye'
+#     #     df.loc[df['Label'].str.contains('tcpflood', case=False), 'Label'] = 'Attack-DoS-TCPFlood'
+#     #     df.loc[df['Label'].str.contains('ftp', case=False), 'Label'] = 'Attack-BruteForce-FTP'
+#     #     df.loc[df['Label'].str.contains('ssh', case=False), 'Label'] =
+#     #     'Attack-BruteForce-SSH'
+    
+#     df.loc[df['Label'].str.contains('benign', case=False), 'Label'] = 'Benign'
+#     df.loc[df['Label'].str.contains('hulk', case=False), 'Label'] = 'Attack-DoS' 
+#     df.loc[df['Label'].str.contains('slowloris', case=False), 'Label'] = 'Attack-DoS'
+#     df.loc[df['Label'].str.contains('slowhttptest', case=False), 'Label'] = 'Attack-DoS'
+#     df.loc[df['Label'].str.contains('goldeneye', case=False), 'Label'] = 'Attack-DoS'
+#     df.loc[df['Label'].str.contains('tcpflood', case=False), 'Label'] = 'Attack-DoS'
+#     df.loc[df['Label'].str.contains('ftp', case=False), 'Label'] = 'Attack-BruteForce'
+#     df.loc[df['Label'].str.contains('ssh', case=False), 'Label'] = 'Attack-BruteForce'
 
 def map_ports(features, feature_name):
     """

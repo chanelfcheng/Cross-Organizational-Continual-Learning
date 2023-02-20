@@ -11,24 +11,6 @@ from scipy.stats.mstats import winsorize
 from torch.utils.data import TensorDataset
 from utils.preprocessing import process_features, remove_invalid, resample_data
 
-# Datasets
-CIC_2018 = 'cic-2018'
-USB_2021 = 'usb-2021'
-
-# Classes (benign is always first)
-CIC_CLASSES = ['Benign', 'DoS-Hulk', 'DoS-Slowloris', 'DoS-SlowHttpTest', 'DoS-GoldenEye']
-USB_CLASSES = ['Benign', 'DoS-Hulk', 'DoS-Slowloris', 'DoS-SlowHttpTest', 'DoS-TCPFlood']
-UNKNOWN = ['Unknown']
-
-# Data paths
-# TODO: Change this to reflect your local path to the data files
-data_path = os.path.abspath(os.path.join(os.getcwd(), os.pardir, 'data/'))
-CIC_PATH = os.path.join(data_path, 'CIC-IDS2018')
-USB_PATH = os.path.join(data_path, 'USB-IDS2021')
-
-# Pickle paths
-PKL_PATH = os.path.abspath(os.path.join(os.pardir, os.getcwd(), 'pickle/'))
-
 # Get number of samples for each class in a dataset
 def get_support(dataset):
     support = {}

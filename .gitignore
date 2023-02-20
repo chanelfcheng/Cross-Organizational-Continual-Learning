@@ -3,8 +3,7 @@
 *.png
 *.html
 *.txt
-*.pth
-test.py
+*.pt
 
 __pycache__/
 */__pycache__/

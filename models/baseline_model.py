@@ -1,21 +1,48 @@
 import os
 import sys
 import time
-import csv
 import math
 import copy
-from datetime import datetime, timedelta
+from argparse import Namespace
+from tqdm import tqdm
 
 import numpy as np
-import pandas as pd
-import torch
-from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, ConfusionMatrixDisplay, classification_report
-from torch.utils.tensorboard import SummaryWriter
-from tqdm import tqdm
-
 from matplotlib import pyplot as plt
+
+import torch
+from torch import nn
+from torch.utils.tensorboard import SummaryWriter
+
+from sklearn.metrics import accuracy_score, f1_score, confusion_matrix, ConfusionMatrixDisplay, classification_report
 from sklearn.manifold import TSNE
-from tqdm import tqdm
+
+
+class BaselineModel(nn.Module):
+    """
+    Baseline learning model.
+    """
+    NAME = None
+    COMPATIBILITY = []
+
+    def __init__(self, architecture: nn.Module, criterion: nn.Module, optimizer: nn.Module,
+                args: Namespace) -> None:
+        super(BaselineModel, self).__init__()
+
+        self.net = architecture
+        self.loss = criterion
+        self.args = args
+        self.opt = optimizer
+        self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        """
+        Computes a forward pass.
+        :param x: batch of inputs
+        :param task_label: some models require the task label
+        :return: the result of the computation
+        """
+        return self.net(x)
+
 
 def train(model, criterion, optimizer, scheduler, patience, dataloaders, device, eval_batch_freq, out_path, train, test,
                 n_epochs=25):
@@ -38,7 +65,7 @@ def train(model, criterion, optimizer, scheduler, patience, dataloaders, device,
 
     since = time.time()
 
-    best_model_wts = copy.deepcopy(model.state_dict())
+    best_model_wts = copy.deepcopy(model.net.state_dict())
     best_f1 = 0.0
     best_acc = 0.0
     best_loss = 1_000_000.
@@ -53,10 +80,10 @@ def train(model, criterion, optimizer, scheduler, patience, dataloaders, device,
         for phase in [train, test]:
             if phase == train:
                 print('Training model...')
-                model.train()  # Set model to training mode
+                model.net.train()  # Set model to training mode
             else:
                 print('Evaluating model...')
-                model.eval()  # Set model to evaluate mode
+                model.net.eval()  # Set model to evaluate mode
             start = True
 
             running_loss = 0.0
@@ -111,10 +138,10 @@ def train(model, criterion, optimizer, scheduler, patience, dataloaders, device,
                             best_f1 = eval_f1
 
                             # Deep copy model weights with best f1 score
-                            best_model_wts = copy.deepcopy(model.state_dict())
+                            best_model_wts = copy.deepcopy(model.net.state_dict())
 
                             # Save best model
-                            torch.save(model.state_dict(), os.path.join(out_path, 'model_epoch_%d.pt' % epoch))
+                            torch.save(model.net.state_dict(), os.path.join(out_path, 'model_epoch_%d.pt' % epoch))
                         
                         # Update best accuracy
                         if eval_acc > best_acc:
@@ -146,7 +173,7 @@ def train(model, criterion, optimizer, scheduler, patience, dataloaders, device,
                                     file.write('training time (min): ' + str(time_elapsed / 60))
 
                                 # Load best model
-                                model.load_state_dict(best_model_wts)
+                                model.net.load_state_dict(best_model_wts)
                                 return model
                         
             # Calculate metrics
@@ -183,7 +210,7 @@ def train(model, criterion, optimizer, scheduler, patience, dataloaders, device,
     print('Best Accuracy: {:4f}'.format(best_acc))
 
     # Load best model weights
-    model.load_state_dict(best_model_wts)
+    model.net.load_state_dict(best_model_wts)
     return model
 
 def eval(model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01):
@@ -197,7 +224,7 @@ def eval(model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01
     :param tsne_percent: The percentage of evaluation data to plot for TSNE
     :return: The f1-score and accuracy
     """
-    model.eval()  # Set model to evaluate mode
+    model.net.eval()  # Set model to evaluate mode
     start_test = True
 
     # Iterate over data.
@@ -275,94 +302,3 @@ def eval(model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01
         report = classification_report(all_labels, all_preds, target_names=dataloader.dataset.classes, digits=4)
         print('\n', report)
         return ave_f1_score, top1_acc, report
-
-
-def train_continual(model, dataset, out_path, counter, args):
-    print('\nTraining phase')
-    print('Current malicious class:',  list(dataset.label_mapping.keys())[dataset.train_classes[1]])
-    model.net.to(model.device)
-
-    model.net.train()
-    i = 0
-    start = time.time()
-    while not dataset.train_over:
-        if i == 0:
-            max_progress = sum(dataset.active_remaining_training_items) // args.batch_size
-        
-        if not (i + 1) % (max_progress + 1):
-            eval_continual(model, dataset, out_path, counter)
-
-            for key in model.buffer.buffer_content:
-                model.buffer.buffer_content[key] = (model.buffer.buffer_content[key] // (model.buffer.batch_count)) / args.batch_size
-
-            print(model.buffer.buffer_content)
-            print(model.buffer.batch_count)
-            
-            model.buffer.batch_count = 0
-
-            for key in model.buffer.buffer_content:
-                model.buffer.buffer_content[key] = 0
-
-            i = 0
-        else:
-            i += 1
-        
-        inputs, labels = dataset.get_train_data()
-        inputs, labels = inputs.to(model.device), labels.to(model.device)
-        loss = model.observe(inputs.float(), labels)
-
-        progress_bar(i, max_progress, dataset.completed_rounds + 1, 'C', loss)
-    
-    time_elapsed = time.time() - start
-    print(f'\nTraining complete in {timedelta(seconds=round(time_elapsed))}')
-
-    with open(os.path.join(out_path, f'log_{counter}.txt'), 'a') as file:
-        file.write(f'\nTraining complete in {timedelta(seconds=round(time_elapsed))}\n')
-
-    torch.save(model.state_dict(), os.path.join(out_path, f'model_{counter}.pt'))
-
-    eval_continual(model, dataset, out_path, counter)
-
-def eval_continual(model, dataset, out_path, counter):
-    print('\nEvaluation phase')
-    model.net.eval()
-    dataset.test_over = False
-    dataset.test_class = 0
-    start_test = True
-    
-    while not dataset.test_over:
-        inputs, labels = dataset.get_test_data()
-        inputs, labels = inputs.to(model.device), labels.to(model.device)
-        outputs = model(inputs.float())
-        _, preds = torch.max(outputs.data, 1)
-
-        if start_test:
-            all_preds = preds.float().cpu()
-            all_labels = labels.float()
-            start_test = False
-        else:
-            all_preds = torch.cat((all_preds, preds.float().cpu()), 0)
-            all_labels = torch.cat((all_labels, labels.float()), 0)
-    
-    all_labels = all_labels.detach().cpu().numpy()
-    all_preds = all_preds.detach().cpu().numpy()
-
-    report = classification_report(all_labels, all_preds, target_names=dataset.classes, digits=4)
-    print(report)
-
-    with open(os.path.join(out_path, f'log_{counter}.txt'), 'a') as file:
-        file.write(f'\n{report}\n')
-    
-    return report
-
-def progress_bar(i, max_iter, rounds, task_number, loss):
-    if not (i + 1) % 10 or (i + 1) == max_iter:
-        progress = min(float((i + 1) / max_iter), 1)
-        progress_bar = ('█' * int(50 * progress)) + ('┈' * (50 - int(50 * progress)))
-        print('\r[ {} ] Task {} | round {}: |{}| loss: {:.2e}'.format(
-            datetime.now().strftime("%m-%d | %H:%M"),
-            task_number + 1 if isinstance(task_number, int) else task_number,
-            rounds,
-            progress_bar,
-            loss
-        ), file=sys.stderr, end='', flush=True)

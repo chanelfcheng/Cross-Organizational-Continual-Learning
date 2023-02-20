@@ -24,7 +24,7 @@ class FocalLoss(nn.Module):
                  ignore_index: int = -100):
         """Constructor.
         Args:
-            alpha (Tensor, optional): Weights for each class. Defaults to None.
+            beta (Tensor, optional): Weights for each class. Defaults to None.
             gamma (float, optional): A constant, as described in the paper.
                 Defaults to 0.
             reduction (str, optional): 'mean', 'sum' or 'none'.
@@ -37,7 +37,7 @@ class FocalLoss(nn.Module):
                 'Reduction must be one of: "mean", "sum", "none".')
 
         super().__init__()
-        self.alpha = beta
+        self.beta = beta
         self.gamma = gamma
         self.ignore_index = ignore_index
         self.reduction = reduction
@@ -46,7 +46,7 @@ class FocalLoss(nn.Module):
             weight=beta, reduction='none', ignore_index=ignore_index)
 
     def __repr__(self):
-        arg_keys = ['alpha', 'gamma', 'ignore_index', 'reduction']
+        arg_keys = ['beta', 'gamma', 'ignore_index', 'reduction']
         arg_vals = [self.__dict__[k] for k in arg_keys]
         arg_strs = [f'{k}={v}' for k, v in zip(arg_keys, arg_vals)]
         arg_str = ', '.join(arg_strs)
@@ -66,8 +66,8 @@ class FocalLoss(nn.Module):
             return torch.tensor(0.)
         x = x[unignored_mask]
 
-        # compute weighted cross entropy term: -alpha * log(pt)
-        # (alpha is already part of self.nll_loss)
+        # compute weighted cross entropy term: -beta * log(pt)
+        # (beta is already part of self.nll_loss)
         log_p = F.log_softmax(x, dim=-1)
         ce = self.nll_loss(log_p, y)
 
@@ -79,7 +79,7 @@ class FocalLoss(nn.Module):
         pt = log_pt.exp()
         focal_term = (1 - pt)**self.gamma
 
-        # the full loss: -alpha * ((1 - pt)^gamma) * log(pt)
+        # the full loss: -beta * ((1 - pt)^gamma) * log(pt)
         loss = focal_term * ce
 
         if self.reduction == 'mean':
@@ -90,7 +90,7 @@ class FocalLoss(nn.Module):
         return loss
 
 
-def focal_loss(alpha: Optional[Sequence] = None,
+def focal_loss(beta: Optional[Sequence] = None,
                gamma: float = 0.,
                reduction: str = 'mean',
                ignore_index: int = -100,
@@ -98,7 +98,7 @@ def focal_loss(alpha: Optional[Sequence] = None,
                dtype=torch.float32) -> FocalLoss:
     """Factory function for FocalLoss.
     Args:
-        alpha (Sequence, optional): Weights for each class. Will be converted
+        beta (Sequence, optional): Weights for each class. Will be converted
             to a Tensor if not None. Defaults to None.
         gamma (float, optional): A constant, as described in the paper.
             Defaults to 0.
@@ -106,19 +106,19 @@ def focal_loss(alpha: Optional[Sequence] = None,
             Defaults to 'mean'.
         ignore_index (int, optional): class label to ignore.
             Defaults to -100.
-        device (str, optional): Device to move alpha to. Defaults to 'cpu'.
-        dtype (torch.dtype, optional): dtype to cast alpha to.
+        device (str, optional): Device to move beta to. Defaults to 'cpu'.
+        dtype (torch.dtype, optional): dtype to cast beta to.
             Defaults to torch.float32.
     Returns:
         A FocalLoss object
     """
-    if alpha is not None:
-        if not isinstance(alpha, Tensor):
-            alpha = torch.tensor(alpha)
-        alpha = alpha.to(device=device, dtype=dtype)
+    if beta is not None:
+        if not isinstance(beta, Tensor):
+            beta = torch.tensor(beta)
+        beta = beta.to(device=device, dtype=dtype)
 
     fl = FocalLoss(
-        beta=alpha,
+        beta=beta,
         gamma=gamma,
         reduction=reduction,
         ignore_index=ignore_index)
