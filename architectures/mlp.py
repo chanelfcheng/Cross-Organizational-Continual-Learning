@@ -4,12 +4,11 @@ class MLP(nn.Module):
     """
     MLP model for network intrusion detection
     """
-    def __init__(self, num_features, num_classes, embeddings=False):
+    def __init__(self, num_features, num_classes):
         super().__init__()
 
         self.num_in_features = num_features
         self.num_classes = num_classes
-        self.embeddings = embeddings
 
         self.layer1 = nn.Linear(num_features, 100)
         self.layer2 = nn.Linear(100, 200)
@@ -21,16 +20,16 @@ class MLP(nn.Module):
         self.act = nn.ReLU()
         # self.softmax = nn.Softmax(dim=0)
 
-    def forward(self, x):
+    def forward(self, x, return_embedding=False):
         x = self.act(self.layer1(x))
         x = self.act(self.layer2(x))
         x = self.act(self.layer3(x))
         x = self.act(self.layer4(x))
-        features = self.act(self.layer5(x))
-        x = self.fc(features)
-        # x = self.softmax(x)
+        embed = self.act(self.layer5(x))
+        out = self.fc(embed)
+        # out = self.softmax(out)
 
-        if self.embeddings:
-            return x, features
+        if return_embedding:
+            return out, embed
         else:
-            return x
+            return out

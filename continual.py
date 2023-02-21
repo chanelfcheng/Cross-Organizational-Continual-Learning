@@ -88,6 +88,9 @@ def main():
 
     args = parser.parse_args()
     user_in = input("Train or evaluate the model? (train/eval) ")
+
+    while user_in not in ['train', 'eval']:
+        user_in = input("Train or evaluate the model? (train/eval) ")
     
     model, dataset, out_path, counter = run_continual(args)
 

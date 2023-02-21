@@ -13,6 +13,7 @@ import torch
 from torch.nn import functional as F
 
 from sklearn.metrics import classification_report, confusion_matrix
+from sklearn.manifold import TSNE
 
 from utils.buffer import Buffer, ModifiedBuffer
 from utils.progress import progress_bar
@@ -173,11 +174,10 @@ def train_continual(model, dataset, out_path, counter, args):
     eval_continual_last(model, dataset, out_path, counter)
 
 def eval_continual_last(model, dataset, out_path, counter):
-    all_labels, all_preds = eval_continual(model, dataset, out_path, counter)
-    save_confusion_matrix(all_labels, all_preds, dataset.classes, out_path, counter)
-    save_feature_embeddings(model, dataset, out_path, counter)    
+    all_labels, all_preds, _ = eval_continual(model, dataset, out_path, counter, save_embedding=True)
+    save_confusion_matrix(all_labels, all_preds, dataset.classes, out_path, counter)    
 
-def eval_continual(model, dataset, out_path, counter):
+def eval_continual(model, dataset, out_path, counter, save_embedding=False):
     print('\nEvaluation phase')
     model.net.to(model.device)
 
@@ -189,26 +189,47 @@ def eval_continual(model, dataset, out_path, counter):
     while not dataset.test_over:
         inputs, labels = dataset.get_test_data()
         inputs, labels = inputs.to(model.device), labels.to(model.device)
-        outputs = model(inputs.float())
+        outputs, embeddings = model.net(inputs.float(), return_embedding=True)
+
         _, preds = torch.max(outputs.data, 1)
 
         if start_test:
             all_preds = preds.float().cpu()
             all_labels = labels.float()
+            all_embeddings = embeddings.float().cpu()
             start_test = False
         else:
             all_preds = torch.cat((all_preds, preds.float().cpu()), 0)
             all_labels = torch.cat((all_labels, labels.float()), 0)
+            all_embeddings = torch.cat((all_embeddings, embeddings.float().cpu()), 0)
     
     all_labels = all_labels.detach().cpu().numpy()
     all_preds = all_preds.detach().cpu().numpy()
+    all_embeddings = all_embeddings.detach().cpu().numpy()
+
 
     report = classification_report(all_labels, all_preds, target_names=dataset.classes, digits=4)
     print(report)
 
     log_results(report, out_path, counter)
 
-    return all_labels, all_preds
+    if save_embedding:
+        tsne = TSNE(2)
+        rand_idx = np.random.randint(len(all_embeddings), size=1000)
+        tsne_proj = tsne.fit_transform(all_embeddings[rand_idx,:])
+
+        plt.clf()
+        fig, ax = plt.subplots(figsize=(8, 8))
+        for i in range(dataset.num_classes):
+            indices = all_labels[rand_idx] == i
+            ax.scatter(tsne_proj[indices, 0], tsne_proj[indices, 1], label=dataset.classes[i],
+                       alpha=0.5)
+        ax.legend(fontsize='large', markerscale=2)
+        plt.title('t-SNE embeddings')
+        plt.savefig(os.path.join(out_path, f'embeddings_{counter}.png'))
+        plt.close('all')
+    
+    return all_labels, all_preds, all_embeddings
 
 def init_log(out_path, counter, args):
     with open(os.path.join(out_path, f'log_{counter}.txt'), 'w') as file:
@@ -240,10 +261,3 @@ def save_confusion_matrix(labels, preds, classes, out_path, counter):
     plt.xlabel('Predicted', fontsize=15)
     plt.ylabel('True', fontsize=15)
     plot_matrix.figure.savefig(os.path.join(out_path, filename), bbox_inches='tight')
-    
-    ### DEBUGGING ###
-    print(os.path.join(out_path, filename))
-    ### DEBUGGING ###
-
-def save_feature_embeddings(model, dataset, out_path, counter):
-    filename = f'embeddings_{counter}.png'
