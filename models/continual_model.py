@@ -4,12 +4,15 @@ from datetime import timedelta
 from argparse import Namespace
 
 import numpy as np
+import pandas as pd
+import seaborn as sn
+import matplotlib.pyplot as plt
 
 import torch.nn as nn
 import torch
 from torch.nn import functional as F
 
-from sklearn.metrics import classification_report
+from sklearn.metrics import classification_report, confusion_matrix
 
 from utils.buffer import Buffer, ModifiedBuffer
 from utils.progress import progress_bar
@@ -117,6 +120,8 @@ class Der(ContinualModel):
         return loss.item()
 
 def train_continual(model, dataset, out_path, counter, args):
+    init_log(out_path, counter, args)
+
     print('\nTraining phase')
     print('Current malicious class:',  list(dataset.label_mapping.keys())[dataset.train_classes[1]])
     model.net.to(model.device)
@@ -165,11 +170,18 @@ def train_continual(model, dataset, out_path, counter, args):
 
     torch.save(model.state_dict(), os.path.join(out_path, f'model_{counter}.pt'))
 
-    eval_continual(model, dataset, out_path, counter)
+    eval_continual_last(model, dataset, out_path, counter)
+
+def eval_continual_last(model, dataset, out_path, counter):
+    all_labels, all_preds = eval_continual(model, dataset, out_path, counter)
+    save_confusion_matrix(all_labels, all_preds, dataset.classes, out_path, counter)
+    save_feature_embeddings(model, dataset, out_path, counter)    
 
 def eval_continual(model, dataset, out_path, counter):
     print('\nEvaluation phase')
-    model.net.eval()
+    model.net.to(model.device)
+
+    model.eval()
     dataset.test_over = False
     dataset.test_class = 0
     start_test = True
@@ -194,7 +206,44 @@ def eval_continual(model, dataset, out_path, counter):
     report = classification_report(all_labels, all_preds, target_names=dataset.classes, digits=4)
     print(report)
 
-    with open(os.path.join(out_path, f'log_{counter}.txt'), 'a') as file:
+    log_results(report, out_path, counter)
+
+    return all_labels, all_preds
+
+def init_log(out_path, counter, args):
+    with open(os.path.join(out_path, f'log_{counter}.txt'), 'w') as file:
+        file.write('Config for run: %s\n' % args.exp_name)
+        file.write('CATEGORICAL: %s\n' % args.categorical)
+        file.write('NUM_ROUNDS: %d\n' % args.num_rounds)
+        file.write('NUM_EPOCHS: %d\n' % args.n_epochs)
+        file.write('BATCH_SIZE: %d\n' % args.batch_size)
+        file.write('MINIBATCH_SIZE: %d\n' % args.minibatch_size)
+        file.write('BUFFER_SIZE: %d\n' % args.buffer_size)
+        file.write('BUFFER_STRATEGY: %s\n' % args.buffer_strategy)
+        if args.alpha > 0: file.write('ALPHA: %f\n' % args.alpha)
+        file.write('GAMMA: %f\n' % args.gamma)
+        file.write('LR: %e\n' % args.lr)
+
+def log_results(report, out_path, counter):
+    filename = f'log_{counter}.txt'
+    with open(os.path.join(out_path, filename), 'a') as file:
         file.write(f'\n{report}\n')
+
+def save_confusion_matrix(labels, preds, classes, out_path, counter):
+    matrix = confusion_matrix(labels, preds, normalize='true')
+    filename = f'matrix_{counter}.png'
+
+    df_matrix = pd.DataFrame(matrix, index=classes, columns=classes)
+    fig, ax = plt.subplots(1, 1, figsize=(15, 10))
+    # plt.figure(figsize=(15,10))
+    plot_matrix = sn.heatmap(df_matrix, annot=True, ax=ax)
+    plt.xlabel('Predicted', fontsize=15)
+    plt.ylabel('True', fontsize=15)
+    plot_matrix.figure.savefig(os.path.join(out_path, filename), bbox_inches='tight')
     
-    return report
+    ### DEBUGGING ###
+    print(os.path.join(out_path, filename))
+    ### DEBUGGING ###
+
+def save_feature_embeddings(model, dataset, out_path, counter):
+    filename = f'embeddings_{counter}.png'

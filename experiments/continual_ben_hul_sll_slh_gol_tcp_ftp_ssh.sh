@@ -9,5 +9,5 @@ python continual.py \
 --dataset-names "cic-2018,usb-2021" \
 --dataset-paths "../data/CIC-IDS2018/DoS+Hulk,../data/USB-IDS2021" \
 --dataset-classes "benign,hulk,slowloris,slowhttp,goldeneye,tcpflood,ftp,ssh" \
---rename-labels "Benign,DoS,DoS,DoS,DoS,DoS,BruteForce,BruteForce" \
+--rename-labels "Benign,DoS-Hulk,DoS-Slowloris,DoS-SlowHttpTest,DoS-GoldenEye,DoS-TCPFlood,BruteForce-FTP,BruteForce-SSH" \
 --arch "mlp"

@@ -1,7 +1,6 @@
 import os
 import argparse
 
-from collections import namedtuple
 import numpy as np
 import torch.optim as optim
 import torch
@@ -12,7 +11,7 @@ from datasets import get_support
 from datasets.continual_dataset import ContinualDataset
 from utils.focal_loss import FocalLoss
 from utils import create_if_not_exists
-from models.continual_model import train_continual, Er, Der
+from models.continual_model import train_continual, eval_continual_last, Er, Der
 
 """
 usage: continual.py [-h] 
@@ -25,10 +24,8 @@ usage: continual.py [-h]
 """
 
 def run_continual(args):
-    name = args.exp_name
     dataset_names = args.dataset_names.split(',')
     dataset_classes = args.dataset_classes.split(',')
-    include_categorical = args.categorical
     
     dataset = ContinualDataset(args)
     print('\nContinual dataset:', dataset_names)
@@ -45,7 +42,7 @@ def run_continual(args):
     weights = torch.Tensor(weights).to(device)
 
     # Initialize model
-    architecture = MLP(88 if include_categorical else 76, dataset.num_classes)
+    architecture = MLP(88 if args.categorical else 76, dataset.num_classes)
     criterion = FocalLoss(beta=weights, gamma=args.gamma)
     # criterion = nn.CrossEntropyLoss()
     optimizer = optim.RAdam(architecture.parameters(), lr=args.lr)
@@ -57,27 +54,14 @@ def run_continual(args):
         for key in range(dataset.num_classes):
             model.buffer.buffer_content[key] = 0
 
-    out_path = os.path.join('./out/', name)
+    out_path = os.path.join('./out/', args.exp_name)
     create_if_not_exists(out_path)
 
     counter = 0
-    while os.path.exists(os.path.join(out_path, f'log_{counter}.txt')):
+    while os.path.exists(os.path.join(out_path, f'model_{counter}.pt')):
         counter += 1
     
-    with open(os.path.join(out_path, f'log_{counter}.txt'), 'w') as file:
-        file.write('Config for run: %s\n' % name)
-        file.write('CATEGORICAL: %s\n' % args.categorical)
-        file.write('NUM_ROUNDS: %d\n' % args.num_rounds)
-        file.write('NUM_EPOCHS: %d\n' % args.n_epochs)
-        file.write('BATCH_SIZE: %d\n' % args.batch_size)
-        file.write('MINIBATCH_SIZE: %d\n' % args.minibatch_size)
-        file.write('BUFFER_SIZE: %d\n' % args.buffer_size)
-        file.write('BUFFER_STRATEGY: %s\n' % args.buffer_strategy)
-        if args.alpha > 0: file.write('ALPHA: %f\n' % args.alpha)
-        file.write('GAMMA: %f\n' % args.gamma)
-        file.write('LR: %e\n' % args.lr)
-    
-    train_continual(model, dataset, out_path, counter, args)
+    return model, dataset, out_path, counter
 
 def main():
     parser = argparse.ArgumentParser()
@@ -103,9 +87,16 @@ def main():
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate during training')
 
     args = parser.parse_args()
+    user_in = input("Train or evaluate the model? (train/eval) ")
+    
+    model, dataset, out_path, counter = run_continual(args)
 
-    if args.arch == 'mlp':
-        run_continual(args)
+    if user_in == 'train':
+        train_continual(model, dataset, out_path, counter, args)
+    if user_in == 'eval':
+        counter -= 1
+        model.load_state_dict(torch.load(os.path.join(out_path, f'model_{counter}.pt')))
+        eval_continual_last(model, dataset, out_path, counter)
 
 if __name__ == '__main__':
     main()
