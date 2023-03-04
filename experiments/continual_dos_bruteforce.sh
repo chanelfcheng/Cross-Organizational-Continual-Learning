@@ -7,7 +7,7 @@ cd ..
 python continual.py \
 --exp-name $(basename ${0%".sh"}) \
 --dataset-names "cic-2018,usb-2021" \
---dataset-paths "../data/CIC-IDS2018/DoS+BruteForce,../data/USB-IDS2021" \
---dataset-classes "benign,hulk,ssh" \
---rename-labels "Benign,DoS,BruteForce" \
+--dataset-paths "../data/CIC-IDS2018/Hulk+FTP,../data/USB-IDS2021" \
+--dataset-classes "hulk,ftp" \
+--rename-labels "DoS,BruteForce" \
 --arch "mlp"
