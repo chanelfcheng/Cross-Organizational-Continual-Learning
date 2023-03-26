@@ -62,8 +62,8 @@ class Er(ContinualModel):
         self.buffer = ModifiedBuffer(self.args.buffer_size, self.args.sampling_threshold, self.device) if self.args.buffer_strategy == 'uncertainty' \
             else Buffer(self.args.buffer_size, self.device)
 
-    def observe(self, inputs, labels):
-        self.buffer.add_data(self.net, examples=inputs,labels=labels) if self.args.buffer_strategy == 'uncertainty' \
+    def observe(self, inputs, labels, drift=None):
+        self.buffer.add_data(self.net, examples=inputs, labels=labels, drift=drift) if self.args.buffer_strategy == 'uncertainty' \
         else self.buffer.add_data(examples=inputs, labels=labels)
 
         self.opt.zero_grad()
@@ -120,7 +120,29 @@ class Der(ContinualModel):
 
         return loss.item()
 
-def train_continual(model, dataset, out_path, counter, args):
+class Ddm():
+    def __init__(self, autoencoder, optimizer):
+        self.optimizer = optimizer
+        self.autoencoder = autoencoder
+    
+    def observe(self, inputs):
+        # Normalize the data to be between 0 and 1 (VAE requires this)
+        mean = inputs.mean()
+        std = inputs.std()
+        inputs = (inputs - mean) / std
+        inputs = (inputs - inputs.min()) / (inputs.max() - inputs.min())
+
+        r_inputs, mu, logvar = self.autoencoder(inputs)
+        loss = self.autoencoder.encoder_loss(r_inputs, inputs, mu, logvar)
+
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+
+        return loss.item()
+        
+
+def train_continual(model, drift_detector, dataset, out_path, counter, args):
     init_log(out_path, counter, args)
 
     print('\nTraining phase')
@@ -128,6 +150,8 @@ def train_continual(model, dataset, out_path, counter, args):
     model.net.to(model.device)
 
     model.net.train()
+    drift_detector.autoencoder.train()
+
     i = 0
     start = time.time()
     while not dataset.train_over:
@@ -150,16 +174,16 @@ def train_continual(model, dataset, out_path, counter, args):
                 model.buffer.buffer_content[key] = 0
 
             model.buffer.sample_count = 0
-            model.buffer.max_probability_sum = 0
-            model.buffer.confidence_sum = 0
 
             i = 0
         else:
             i += 1
         
         inputs, labels = dataset.get_train_data()
+        # drift = drift_detector.observe(inputs.float())
+
         inputs, labels = inputs.to(model.device), labels.to(model.device)
-        loss = model.observe(inputs.float(), labels)
+        loss = model.observe(inputs.float(), labels, drift=None)
 
         progress_bar(i, max_progress, dataset.completed_rounds + 1, 'C', loss)
     

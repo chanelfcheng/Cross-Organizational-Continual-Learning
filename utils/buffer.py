@@ -112,22 +112,33 @@ class ModifiedBuffer:
                 setattr(self, attr_str, torch.zeros((self.buffer_size,
                         *attr.shape[1:]), dtype=typ, device=self.device))
 
-    def uncertainty_reservoir(self, model, sampling_threshold, current_input: torch.tensor):
+    def uncertainty_reservoir(self, model, sampling_threshold, current_input, drift=None):
+        # print("drift:", drift)
         outputs = model(current_input.float())
         p = torch.softmax(outputs, dim=0)
         max_p, _ = torch.max(p, 0)
 
         if max_p < sampling_threshold: # sampling threshold (for seen classes)
-            return 1 # model is uncertain about this sample's class
+            return 1 # model is uncertain about this sample's class    
+        # elif drift is not None:
+        #     if drift > 0.1:
+        #         print("drift detected:", drift)
+        #         return 1
+        #     else:
+        #         # print("drift NOT detected:", drift)
+        #         return 0
+        # elif torch.argmax(p) == 2:
+        #     return 1
         else:
-            return 0 # wow i am so confident that i don't need to sample this
+            return 0
+            # return 1 # TESTING INITIAL MODEL
 
-    def add_data(self, model, examples, labels=None, logits=None):
+    def add_data(self, model, examples, labels=None, logits=None, drift=None):
         if not hasattr(self, 'examples'):
             self.init_tensors(examples, labels, logits)
         
         for i in range(examples.shape[0]):
-            uncertain = self.uncertainty_reservoir(model, self.sampling_threshold, examples[i])
+            uncertain = self.uncertainty_reservoir(model, self.sampling_threshold, examples[i], drift=drift)
             index = np.random.randint(0, self.num_examples) if self.num_examples > 0 else 0
             if uncertain != 0:
                 if self.num_examples < self.buffer_size:

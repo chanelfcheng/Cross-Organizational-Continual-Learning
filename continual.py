@@ -7,11 +7,13 @@ import torch
 
 from architectures import ARCHITECTURES
 from architectures.mlp import MLP
+from architectures.vae import VAE
 from datasets import get_support
 from datasets.continual_dataset import ContinualDataset
 from utils.focal_loss import FocalLoss
 from utils import create_if_not_exists
-from models.continual_model import train_continual, eval_continual_last, Er, Der
+from models.continual_model import train_continual, eval_continual_last, \
+    Er, Der, Ddm
 
 """
 usage: continual.py [-h] 
@@ -41,16 +43,16 @@ def run_continual(args):
     weights = weights / np.sum(weights) * dataset.num_classes
     weights = torch.Tensor(weights).to(device)
 
-    # Initialize model
+    # Initialize model for attack detection
     architecture = MLP(88 if args.categorical else 76, dataset.num_classes)
     criterion = FocalLoss(beta=weights, gamma=args.gamma)
     # criterion = nn.CrossEntropyLoss()
-    optimizer = optim.RAdam(architecture.parameters(), lr=args.lr)
+    optimizer1 = optim.RAdam(architecture.parameters(), lr=args.lr)
     # optimizer = SGD(architecture.parameters(), lr=args.lr)
     if args.alpha > 0:
-        model = Der(architecture, criterion, optimizer, args)
+        model = Der(architecture, criterion, optimizer1, args)
     else:
-        model = Er(architecture, criterion, optimizer, args)
+        model = Er(architecture, criterion, optimizer1, args)
         for key in range(dataset.num_classes):
             model.buffer.buffer_content[key] = 0
 
@@ -61,7 +63,12 @@ def run_continual(args):
     while os.path.exists(os.path.join(out_path, f'model_{counter}.pt')):
         counter += 1
     
-    return model, dataset, out_path, counter
+    # Initialize autoencoder for drift detection
+    autoencoder = VAE(88 if args.categorical else 76)
+    optimizer2 = optim.Adam(autoencoder.parameters(), lr=args.lr)
+    drift_detector = Ddm(autoencoder, optimizer2)    # drift detection model(DDM)
+
+    return model, drift_detector, dataset, out_path, counter
 
 def main():
     parser = argparse.ArgumentParser()
@@ -92,10 +99,10 @@ def main():
     while user_in not in ['train', 'eval']:
         user_in = input("Train or evaluate the model? (train/eval) ")
     
-    model, dataset, out_path, counter = run_continual(args)
+    model, drift_detector, dataset, out_path, counter = run_continual(args)
 
     if user_in == 'train':
-        train_continual(model, dataset, out_path, counter, args)
+        train_continual(model, drift_detector, dataset, out_path, counter, args)
     if user_in == 'eval':
         counter -= 1
         model.load_state_dict(torch.load(os.path.join(out_path, f'model_{counter}.pt')))

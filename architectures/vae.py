@@ -1,16 +1,16 @@
 import torch
 from torch import nn
 
-# Defining the model
-
-d = 20
+d = 10  # latent dimension, may be changed later
 
 class VAE(nn.Module):
-    def __init__(self):
+    def __init__(self, num_features):
         super().__init__()
 
+        self.num_features = num_features
+
         self.encoder = nn.Sequential(
-            nn.Linear(88, d ** 2),
+            nn.Linear(num_features, d ** 2),
             nn.ReLU(),
             nn.Linear(d ** 2, d * 2)
         )
@@ -18,7 +18,7 @@ class VAE(nn.Module):
         self.decoder = nn.Sequential(
             nn.Linear(d, d ** 2),
             nn.ReLU(),
-            nn.Linear(d ** 2, 88),
+            nn.Linear(d ** 2, num_features),
             nn.Sigmoid(),
         )
 
@@ -31,8 +31,28 @@ class VAE(nn.Module):
             return mu
 
     def forward(self, x):
-        mu_logvar = self.encoder(x.view(-1, 88)).view(-1, 2, d)
+        mu_logvar = self.encoder(x.view(-1, self.num_features)).view(-1, 2, d)
         mu = mu_logvar[:, 0, :]
         logvar = mu_logvar[:, 1, :]
         z = self.reparameterise(mu, logvar)
         return self.decoder(z), mu, logvar
+
+    def encoder_loss(self, x_hat, x, mu, logvar, w=1):
+        """
+        loss function for the VAE
+        params:
+            x_hat: reconstructed input
+            x: original input
+            mu: mean of the latent distribution
+            logvar: log variance of the latent distribution
+            w: weight of the KL divergence term
+        """
+        # print(f'x_hat: {x_hat}, x: {x}, mu: {mu}, logvar: {logvar}')
+        BCE = nn.functional.mse_loss(
+            x_hat, x.view(-1, self.num_features)
+        )
+        KLD = 0.5 * torch.sum(logvar.exp() - logvar - 1 + mu.pow(2))
+
+        # print(f'BCE: {BCE}, KLD: {KLD}')
+
+        return BCE + w * KLD
