@@ -15,7 +15,7 @@ from sklearn.preprocessing import RobustScaler
 from utils.preprocessing import process_features, remove_invalid, resample_data
 from utils import create_if_not_exists
 
-PKL_PATH = './pickle/continual/'
+PKL_PATH = './pickle/'
 create_if_not_exists(PKL_PATH)
 
 class ContinualDataset:

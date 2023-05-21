@@ -264,7 +264,7 @@ def init_log(out_path, counter, args):
         file.write('BATCH_SIZE: %d\n' % args.batch_size)
         file.write('MINIBATCH_SIZE: %d\n' % args.minibatch_size)
         file.write('BUFFER_SIZE: %d\n' % args.buffer_size)
-        file.write('BUFFER_STRATEGY: %s\n' % args.buffer_strategy)
+        file.write('BUFFER_STRATEGY: %s, %f\n' % (args.buffer_strategy, args.sampling_threshold))
         if args.alpha > 0: file.write('ALPHA: %f\n' % args.alpha)
         file.write('GAMMA: %f\n' % args.gamma)
         file.write('LR: %e\n' % args.lr)

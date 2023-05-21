@@ -89,8 +89,8 @@ def main():
     parser.add_argument('--buffer-size', type=int, default=1000, help='Maximum number of samples the buffer can hold')
     parser.add_argument('--buffer-strategy', type=str, default='uncertainty', help='Strategy to use for sampling to the buffer')
     parser.add_argument('--alpha', type=float, default=-1, help='Balance parameter for balancing trade-off between past and current samples')
-    parser.add_argument('--gamma', type=float, default=2, help='Focus parameter for focal loss')
-    parser.add_argument('--sampling-threshold', type=float, default=0.8, help='Probability threshold for sampling to the buffer')
+    parser.add_argument('--gamma', type=float, default=3, help='Focus parameter for focal loss')
+    parser.add_argument('--sampling-threshold', type=float, default=0.85, help='Probability threshold for sampling to the buffer')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate during training')
 
     args = parser.parse_args()
