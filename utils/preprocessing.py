@@ -9,15 +9,6 @@ from imblearn.over_sampling import RandomOverSampler
 from imblearn.under_sampling import RandomUnderSampler
 from tqdm import tqdm
 
-"""
-TODO: ideas to reprocess data for multiple benign and 1 malicious labels
-ideas: 
-1. check if label is benign
-2. if label is benign and protocol is X, rename label to Benign-X
-3. if label is not benign, rename to Malicious
-4. process same way as before and make pickles
-"""
-
 # Encoder for protocol feature
 ohe1 = OneHotEncoder(sparse=False)
 ohe1.fit(np.array(['0', '6', '17']).reshape(-1,1))  # Most common protocols
@@ -164,6 +155,30 @@ def remove_invalid(features_np, labels_lst):
     print('Removed %d invalid values' % num_invalid)
 
     return features_np, labels_lst, num_invalid
+
+def remove_invalid_v2(features_np):
+    """
+    Cleans a numpy array by removing samples with invalid feature values.
+    :param features: The numpy array of features
+    :param labels: List of the labels for each sample from the data array
+    :return: The processed numpy array
+    """
+    num_invalid = 0
+    remove_idx = []
+
+    print()
+    for flow_idx in tqdm(range(features_np.shape[0]), file=sys.stdout, desc='Cleaning data array...'):
+        for feature_idx in range(features_np.shape[1]):
+            data_val = features_np[flow_idx, feature_idx]
+            if np.isnan(data_val) or np.isinf(data_val):
+                remove_idx.append(flow_idx)
+                num_invalid += 1
+
+    features_np = np.delete(features_np, remove_idx, axis=0)
+
+    print('Removed %d invalid values' % num_invalid)
+
+    return features_np, remove_idx
 
 def resample_data(dset, features, labels):
     """

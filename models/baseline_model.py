@@ -127,7 +127,7 @@ def train(model, criterion, optimizer, scheduler, patience, dataloaders, device,
 
                     # Evaluate the model every set number of batches
                     if (idx + 1) % eval_batch_freq == 0 and eval_batch_freq > 0:
-                        eval_f1, eval_acc, report = eval(model, dataloaders[test], device, out_path=out_path)
+                        eval_f1, eval_acc, report = eval_check(model, dataloaders[test], device, out_path=out_path)
                         
                         # Save results
                         with open(os.path.join(out_path, 'report1.txt'), 'a') as file:
@@ -213,7 +213,7 @@ def train(model, criterion, optimizer, scheduler, patience, dataloaders, device,
     model.net.load_state_dict(best_model_wts)
     return model
 
-def eval(model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01):
+def eval_check(model, dataloader, device, out_path=None, tsne=False, tsne_percent=0.01):
     """
     Evaluate the given model
     :param model: The MLP model

@@ -18,31 +18,31 @@ from sklearn.manifold import TSNE
 from utils.buffer import Buffer, ModifiedBuffer
 from utils.progress import progress_bar
 
-class ContinualModel(nn.Module):
+class ContinualHierarchicalModel(nn.Module):
     """
     Continual learning model.
     """
     NAME = None
     COMPATIBILITY = []
 
-    def __init__(self, architecture: nn.Module, criterion: nn.Module, optimizer: nn.Module,
+    def __init__(self, architectures: nn.Module, criterion: nn.Module, optimizer: nn.Module,
                 args: Namespace) -> None:
-        super(ContinualModel, self).__init__()
+        super(ContinualHierarchicalModel, self).__init__()
 
-        self.net = architecture
+        self.nets = architectures
         self.loss = criterion
         self.args = args
         self.opt = optimizer
         self.device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, net_idx: int) -> torch.Tensor:
         """
         Computes a forward pass.
         :param x: batch of inputs
         :param task_label: some models require the task label
         :return: the result of the computation
         """
-        return self.net(x)
+        return self.nets[net_idx](x)
 
     def observe(self, inputs: torch.Tensor, labels: torch.Tensor) -> float:
         """
@@ -53,17 +53,17 @@ class ContinualModel(nn.Module):
         """
         pass
 
-class Er(ContinualModel):
+class Er(ContinualHierarchicalModel):
     NAME = 'er'
     COMPATIBILITY = ['class-il', 'domain-il', 'task-il', 'general-continual']
 
-    def __init__(self, architecture, criterion, optimizer, args):
-        super(Er, self).__init__(architecture, criterion, optimizer, args)
+    def __init__(self, architectures, criterion, optimizer, args):
+        super(Er, self).__init__(architectures, criterion, optimizer, args)
         self.buffer = ModifiedBuffer(self.args.buffer_size, self.args.sampling_threshold, self.device) if self.args.buffer_strategy == 'uncertainty' \
             else Buffer(self.args.buffer_size, self.device)
 
-    def observe(self, inputs, labels, drift=None):
-        self.buffer.add_data(self.net, examples=inputs, labels=labels, drift=drift) if self.args.buffer_strategy == 'uncertainty' \
+    def observe(self, inputs, labels, net_idx, drift=None):
+        self.buffer.add_data(self.nets, examples=inputs, labels=labels, drift=drift) if self.args.buffer_strategy == 'uncertainty' \
         else self.buffer.add_data(examples=inputs, labels=labels)
 
         self.opt.zero_grad()
@@ -82,7 +82,7 @@ class Er(ContinualModel):
             # inputs = torch.cat((inputs, buf_inputs))
             # labels = torch.cat((labels, buf_labels))
 
-        outputs = self.net(buf_inputs)
+        outputs = self.nets[net_idx](buf_inputs)
 
         loss = self.loss(outputs, buf_labels)
         loss.backward()
@@ -91,7 +91,7 @@ class Er(ContinualModel):
         return loss.item()
     
 
-class Der(ContinualModel):
+class Der(ContinualHierarchicalModel):
     NAME = 'der'
     COMPATIBILITY = ['class-il', 'domain-il', 'task-il', 'general-continual']
 
@@ -104,18 +104,18 @@ class Der(ContinualModel):
 
         self.opt.zero_grad()
 
-        outputs = self.net(inputs)
+        outputs = self.nets(inputs)
         loss = self.loss(outputs, labels)
 
         if not self.buffer.is_empty():
             buf_inputs, buf_logits = self.buffer.get_data(
                 self.args.minibatch_size)
-            buf_outputs = self.net(buf_inputs)
+            buf_outputs = self.nets(buf_inputs)
             loss += self.args.alpha * F.mse_loss(buf_outputs, buf_logits)
 
         loss.backward()
         self.opt.step()
-        self.buffer.add_data(self.net, examples=inputs, logits=outputs.data) if self.args.buffer_strategy == 'uncertainty' \
+        self.buffer.add_data(self.nets, examples=inputs, logits=outputs.data) if self.args.buffer_strategy == 'uncertainty' \
             else self.buffer.add_data(examples=inputs, labels=labels)
 
         return loss.item()
@@ -147,9 +147,15 @@ def train(model, dataset, out_path, counter, args):
 
     print('\nTraining phase')
     print('Current malicious class:',  list(dataset.label_mapping.keys())[dataset.train_classes[1]])
-    model.net.to(model.device)
+    model[0].net.to(model.device)
+    model[1].net.to(model.device)
+    for i in range(dataset.num_sub):
+        model[2][i].net.to(model.device)
 
-    model.net.train()
+    model[0].net.train()
+    model[1].net.train()
+    for i in range(dataset.num_sub):
+        model[2][i].net.train()
 
     i = 0
     start = time.time()
@@ -158,27 +164,32 @@ def train(model, dataset, out_path, counter, args):
             max_progress = sum(dataset.active_remaining_training_items) // args.batch_size
         
         if not (i + 1) % (max_progress + 1):
-            eval_check(model, dataset, out_path, counter)
+            eval_check(model[0], dataset, out_path, counter, target_col=-3)
+            eval_check(model[1], dataset, out_path, counter, target_col=-2)
+            for i in range(dataset.num_sub):
+                eval_check(model[2][i], dataset, out_path, counter, target_col=-1)
 
-            for key in model.buffer.buffer_content:
-                model.buffer.buffer_content[key] = (model.buffer.buffer_content[key] // (model.buffer.batch_count)) / args.batch_size
-
-
-            print("samples saved to buffer:", model.buffer.buffer_content)
-            # print("number of batches:", model.buffer.batch_count)
             
-            model.buffer.batch_count = 0
 
-            for key in model.buffer.buffer_content:
-                model.buffer.buffer_content[key] = 0
+            # for key in model.buffer.buffer_content:
+            #     model.buffer.buffer_content[key] = (model.buffer.buffer_content[key] // (model.buffer.batch_count)) / args.batch_size
 
-            model.buffer.sample_count = 0
+
+            # print("samples saved to buffer:", model.buffer.buffer_content)
+            # # print("number of batches:", model.buffer.batch_count)
+            
+            # model.buffer.batch_count = 0
+
+            # for key in model.buffer.buffer_content:
+            #     model.buffer.buffer_content[key] = 0
+
+            # model.buffer.sample_count = 0
 
             i = 0
         else:
             i += 1
         
-        inputs, labels = dataset.get_train_data()
+        inputs, labels = dataset.get_train_data()   # TODO: fix this to get the hierarchical labels
 
         inputs, labels = inputs.to(model.device), labels.to(model.device)
         loss = model.observe(inputs.float(), labels, drift=None)
@@ -191,15 +202,31 @@ def train(model, dataset, out_path, counter, args):
     with open(os.path.join(out_path, f'log_{counter}.txt'), 'a') as file:
         file.write(f'\nTraining complete in {timedelta(seconds=round(time_elapsed))}\n')
 
-    torch.save(model.state_dict(), os.path.join(out_path, f'model_{counter}.pt'))
+    torch.save(model[0].state_dict(), os.path.join(out_path, f'binary_model_{counter}.pt'))
+    torch.save(model[1].state_dict(), os.path.join(out_path, f'super_model_{counter}.pt'))
+    for i in range(dataset.num_sub):
+        torch.save(model[2][i].state_dict(), os.path.join(out_path, f'sub_model_{i}_{counter}.pt'))
 
     eval_last(model, dataset, out_path, counter)
 
 def eval_last(model, dataset, out_path, counter):
-    all_labels, all_preds, _ = eval_check(model, dataset, out_path, counter, save_embedding=True)
-    save_confusion_matrix(all_labels, all_preds, dataset.classes, out_path, counter)    
+    binary_model = model[0].load_state_dict(torch.load(os.path.join(out_path, f'binary_model_{counter}.pt')))
+    super_model = model[1].load_state_dict(torch.load(os.path.join(out_path, f'super_model_{counter}.pt')))
+    sub_models = []
+    for i in range(dataset.num_sub):
+        sub_models += [model[2][i].load_state_dict(torch.load(os.path.join(out_path, f'sub_model_{i}_{counter}.pt')))]
+        
+    all_labels, all_preds, _ = eval_check(binary_model, dataset, out_path, counter, save_embedding=True, target_col=-3)
+    save_confusion_matrix(all_labels, all_preds, dataset.classes, out_path, counter)
 
-def eval_check(model, dataset, out_path, counter, save_embedding=False):
+    all_labels, all_preds, _ = eval_check(super_model, dataset, out_path, counter, save_embedding=True, target_col=-2)
+    save_confusion_matrix(all_labels, all_preds, dataset.super_classes, out_path, counter)
+
+    for i in range(dataset.num_sub):
+        all_labels, all_preds, _ = eval_check(sub_models[i], dataset, out_path, counter, save_embedding=True, target_col=-1)
+        save_confusion_matrix(all_labels, all_preds, dataset.sub_classes[i], out_path, counter)
+
+def eval_check(model, dataset, out_path, counter, save_embedding=False, target_col=-1):
     print('\nEvaluation phase')
     model.net.to(model.device)
 

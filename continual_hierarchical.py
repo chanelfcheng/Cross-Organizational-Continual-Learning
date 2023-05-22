@@ -12,8 +12,8 @@ from datasets import get_support
 from datasets.continual_dataset import ContinualDataset
 from utils.focal_loss import FocalLoss
 from utils import create_if_not_exists
-from models.continual_model import train, eval_last, \
-    Er, Der, Ddm
+from models.continual_hierarchical_model import train, eval_last, \
+    Er, Der
 
 """
 usage: continual.py [-h] 
@@ -25,7 +25,7 @@ usage: continual.py [-h]
 --arch {mlp}
 """
 
-def run_continual(args):
+def run_continual_hierarchical(args):
     dataset_names = args.dataset_names.split(',')
     dataset_classes = args.dataset_classes.split(',')
     
@@ -43,18 +43,39 @@ def run_continual(args):
     weights = weights / np.sum(weights) * dataset.num_classes
     weights = torch.Tensor(weights).to(device)
 
-    # Initialize model for attack detection
-    architecture = MLP(88 if args.categorical else 76, dataset.num_classes)
-    criterion = FocalLoss(beta=weights, gamma=args.gamma)
-    # criterion = nn.CrossEntropyLoss()
-    optimizer1 = optim.RAdam(architecture.parameters(), lr=args.lr)
-    # optimizer = SGD(architecture.parameters(), lr=args.lr)
+    # Initialize model for intrusion detection
+    binary_arch = MLP(88 if args.categorical else 76, 2)
+    super_arch = MLP(88 if args.categorical else 76, dataset.num_super)
+    sub_archs = []
+    for i in range(dataset.num_sub):
+        sub_archs += [MLP(88 if args.categorical else 76, dataset.num_sub[i])]
+
+    binary_criterion = FocalLoss(beta=weights, gamma=args.gamma)
+    super_criterion = FocalLoss(beta=weights, gamma=args.gamma)
+    sub_criterions = []
+    for i in range(dataset.num_sub):
+        sub_criterions += [FocalLoss(beta=weights, gamma=args.gamma)]
+    
+    binary_optimizer = optim.RAdam(binary_arch.parameters(), lr=args.lr)
+    super_optimizer = optim.RAdam(super_arch.parameters(), lr=args.lr)
+    sub_optimizers = []
+    for i in range(dataset.num_sub):
+        sub_optimizers += [optim.RAdam(sub_archs[i].parameters(), lr=args.lr)]
+
     if args.alpha > 0:
-        model = Der(architecture, criterion, optimizer1, args)
+        binary_model = Der(binary_arch, binary_criterion, binary_optimizer, args)
+        super_model = Der(super_arch, super_criterion, super_optimizer, args)
+        sub_models = []
+        for i in range(dataset.num_sub):
+            sub_models += [Der(sub_archs[i], sub_criterions[i], sub_optimizers[i], args)]
     else:
-        model = Er(architecture, criterion, optimizer1, args)
-        for key in range(dataset.num_classes):
-            model.buffer.buffer_content[key] = 0
+        binary_model = Er(binary_arch, binary_criterion, binary_optimizer, args)
+        super_model = Er(super_arch, super_criterion, super_optimizer, args)
+        sub_models = []
+        for i in range(dataset.num_sub):
+            sub_models += [Er(sub_archs[i], sub_criterions[i], sub_optimizers[i], args)]
+        # for key in range(dataset.num_classes):
+        #     model.buffer.buffer_content[key] = 0
 
     out_path = os.path.join('./out/', args.exp_name)
     create_if_not_exists(out_path)
@@ -63,7 +84,9 @@ def run_continual(args):
     while os.path.exists(os.path.join(out_path, f'model_{counter}.pt')):
         counter += 1
 
-    return model, dataset, out_path, counter
+    hierarchical_model = [binary_model, super_model, sub_models]
+
+    return hierarchical_model, dataset, out_path, counter
 
 def main():
     parser = argparse.ArgumentParser()
@@ -94,14 +117,13 @@ def main():
     while user_in not in ['train', 'eval']:
         user_in = input("Train or evaluate the model? (train/eval) ")
     
-    model, dataset, out_path, counter = run_continual(args)
+    hierarchical_model, dataset, out_path, counter = run_continual_hierarchical(args)
 
     if user_in == 'train':
-        train(model, dataset, out_path, counter, args)
+        train(hierarchical_model, dataset, out_path, counter, args)
     if user_in == 'eval':
         counter -= 1
-        model.load_state_dict(torch.load(os.path.join(out_path, f'model_{counter}.pt')))
-        eval_last(model, dataset, out_path, counter)
+        eval_last(hierarchical_model, dataset, out_path, counter)
 
 if __name__ == '__main__':
     main()
