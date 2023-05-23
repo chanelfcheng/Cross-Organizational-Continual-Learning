@@ -79,29 +79,71 @@ def process_features(dset, df, include_categorical):
 
     return features, labels
 
-# def rename_labels(df):
-#     """
-#     Renames label names to be consistent across datasets.
-#     :param df: The dataframe for which the labels will be renamed
-#     """
-#     #     df.loc[df['Label'].str.contains('benign', case=False), 'Label'] = 'Benign'
-#     #     df.loc[df['Label'].str.contains('hulk', case=False), 'Label'] = 'Attack-DoS-Hulk' 
-#     #     df.loc[df['Label'].str.contains('slowloris', case=False), 'Label'] = 'Attack-DoS-Slowloris'
-#     #     df.loc[df['Label'].str.contains('slowhttptest', case=False), 'Label'] = 'Attack-DoS-SlowHttpTest'
-#     #     df.loc[df['Label'].str.contains('goldeneye', case=False), 'Label'] = 'Attack-DoS-GoldenEye'
-#     #     df.loc[df['Label'].str.contains('tcpflood', case=False), 'Label'] = 'Attack-DoS-TCPFlood'
-#     #     df.loc[df['Label'].str.contains('ftp', case=False), 'Label'] = 'Attack-BruteForce-FTP'
-#     #     df.loc[df['Label'].str.contains('ssh', case=False), 'Label'] =
-#     #     'Attack-BruteForce-SSH'
+def process_features_v2(dset, df, include_categorical):
+    """
+    Processes features of a dataset and separates them from their class labels. Updates label names, removes redundant
+    features, and encodes categorical features consistently across multiple datasets.
+    :param dset: The name of the dataset
+    :param df: The dataframe containing the dataset
+    :param include_categorical: Option to include or exclude categorical features
+    :return: The features and their corresponding labels 
+    """
+    print('\nProcessing features...')
+
+    # attack = df.loc[df['Label'].str.contains('attack', case=False)].copy()  # Get attack types
+    # benign = df.loc[df['Label'].str.contains('benign', case=False)].copy()  # Get all benign traffic
+
+    # features = pd.concat([attack, benign]).drop(['Label'], axis=1)  # Concatenate attack/benign and separate label from features
+    # labels = pd.concat([attack, benign])['Label']  # Save labels by themselves
+
+    features = df.drop(['Label0', 'Label1', 'Label2'], axis=1)  # Separate label from features
+    # make a dataframe of labels with only the columns 'Label0', 'Label1', and
+    # 'Label2'
+    labels = df[['Label0', 'Label1', 'Label2']]
+
+    # Remove unused columns if present
+    if 'Timestamp' in features:
+        features = features.drop('Timestamp', axis=1)
+    if 'Flow ID' in features:
+        features = features.drop('Flow ID', axis=1)
+    if 'Src IP' in features:
+        features = features.drop('Src IP', axis=1)
+    if 'Src Port' in features:
+        features = features.drop('Src Port', axis=1)
+    if 'Dst IP' in features:
+        features = features.drop('Dst IP', axis=1)
+
+    # Reset dataframe indexing
+    features.reset_index(drop=True, inplace=True)
+    labels.reset_index(drop=True, inplace=True)
+
+    # Categorical feature processing if included
+    if include_categorical:
+        # Protocol one-hot encoding
+        print('protocol one-hot encoding...')
+        ohe_protocol = ohe1.transform(features['Protocol'].values.reshape(-1,1))
+        ohe_protocol = pd.DataFrame(ohe_protocol, columns=ohe1.get_feature_names_out(['Protocol']))
+        
+        features = features.drop('Protocol', axis=1)
+        features = features.join(ohe_protocol)
+
+        # Destination port mapping
+        print('destination port mapping...')
+        map_ports(features, 'Dst Port')
+
+        # Destination port one-hot encoding
+        print('destination port one-hot encoding...')
+        ohe_dport = ohe2.transform(features['Dst Port'].values.reshape(-1,1))
+        ohe_dport = pd.DataFrame(ohe_dport, columns=ohe2.get_feature_names_out(['Port']))
+
+        features = features.drop('Dst Port', axis=1)
+        features = features.join(ohe_dport)
+    else:
+        features = features.drop(['Protocol', 'Dst Port'], axis=1)
     
-#     df.loc[df['Label'].str.contains('benign', case=False), 'Label'] = 'Benign'
-#     df.loc[df['Label'].str.contains('hulk', case=False), 'Label'] = 'Attack-DoS' 
-#     df.loc[df['Label'].str.contains('slowloris', case=False), 'Label'] = 'Attack-DoS'
-#     df.loc[df['Label'].str.contains('slowhttptest', case=False), 'Label'] = 'Attack-DoS'
-#     df.loc[df['Label'].str.contains('goldeneye', case=False), 'Label'] = 'Attack-DoS'
-#     df.loc[df['Label'].str.contains('tcpflood', case=False), 'Label'] = 'Attack-DoS'
-#     df.loc[df['Label'].str.contains('ftp', case=False), 'Label'] = 'Attack-BruteForce'
-#     df.loc[df['Label'].str.contains('ssh', case=False), 'Label'] = 'Attack-BruteForce'
+    new_df = pd.concat([features, labels], axis=1)
+
+    return new_df
 
 def map_ports(features, feature_name):
     """
@@ -180,6 +222,7 @@ def remove_invalid_v2(features_np):
 
     return features_np, remove_idx
 
+# TODO: Fix ValueError: Input y contains NaN in fit_resample
 def resample_data(dset, features, labels):
     """
     Resamples the data to reduce class imbalance. The largest class is randomly undersampled to 2x greater than the
@@ -268,6 +311,101 @@ def resample_data(dset, features, labels):
     print('Current samples: %d' % len(labels))
 
     return features, labels
+
+def resample_data_v2(dset, df, target_col=-1):
+    """
+    Resamples the data to reduce class imbalance. The largest class is randomly undersampled to 2x greater than the
+    next largest class. The minority classes are randomly oversampled to 20% of
+    the largest class, after undersampling.
+    :param dset: The name of the dataset
+    :param features: The columns containing the features
+    :param labels: The column containing the labels
+    :return: the resampled features and their corresponding labels
+    """
+    features = df.iloc[:, :-1].to_numpy()
+    labels = df.iloc[:, target_col].values.tolist()
+
+    class_samples = {}
+    orig_samples = len(labels)
+    for label in labels:
+        if label not in class_samples:
+            class_samples[label] = 1
+        else:
+            class_samples[label] += 1
+    save_class_hist(class_samples, 'orig_dist_' + dset)
+
+    # Undersample largest class to 2x greater than next largest class
+    largest_num = max(class_samples.values())
+    largest_class = max(class_samples, key=class_samples.get)
+    largest_min_num = 0
+    for class_name in class_samples.keys():
+        if class_name != largest_class and class_samples[class_name] > largest_min_num:
+            largest_min_num = class_samples[class_name]
+    target_largest = 2 * largest_min_num
+    if target_largest < largest_num:
+        print('Reducing %s data from %d to %d samples' % (largest_class, largest_num, target_largest))
+        undersampler = RandomUnderSampler(sampling_strategy={largest_class: target_largest})
+        features, labels = undersampler.fit_resample(features, labels)
+    else:
+        print('Not reducing any classes')
+
+    print('Finished Undersampling')
+    class_samples = {}
+    for label in labels:
+        if label not in class_samples:
+            class_samples[label] = 1
+        else:
+            class_samples[label] += 1
+    save_class_hist(class_samples, 'after_undersampling_' + dset)
+
+    # # Drop extreme minority classes
+    # min_class_count = 0.01 * class_samples['Benign']
+    # print('Dropping classes with < %d samples' % min_class_count)
+
+    # classes_to_drop = []
+    # for class_name in class_samples.keys():
+    #     if class_samples[class_name] < min_class_count:
+    #         classes_to_drop.append(class_name)
+
+    # data, labels = drop_classes(data, labels, classes_to_drop)
+
+    # class_samples = {}
+    # for label in labels:
+    #     if label not in class_samples:
+    #         class_samples[label] = 1
+    #     else:
+    #         class_samples[label] += 1
+    # save_class_hist(class_samples, 'after_dropping_' + name)
+
+    # Oversample smaller classes up to 50% of largest class (after undersampling)
+    largest_num = max(class_samples.values())
+    largest_class = max(class_samples, key=class_samples.get)
+    target_dict = {}
+    target_num = round(largest_num * 0.50)
+    print('Targeting %d samples for each minority class' % target_num)
+    for label in class_samples.keys():
+        if label == largest_class or class_samples[label] > target_num:
+            target_dict[label] = class_samples[label]
+        else:
+            target_dict[label] = target_num
+
+    oversampler = RandomOverSampler(sampling_strategy=target_dict)
+    features, labels = oversampler.fit_resample(features, labels)
+    print('Finished Oversampling')
+    class_samples = {}
+    for label in labels:
+        if label not in class_samples:
+            class_samples[label] = 1
+        else:
+            class_samples[label] += 1
+    save_class_hist(class_samples, 'after_oversampling_' + dset)
+    print('Original samples: %d' % orig_samples)
+    print('Current samples: %d' % len(labels))
+
+    resampled_df = pd.DataFrame(features)
+    resampled_df[target_col] = labels
+
+    return resampled_df
 
 def drop_classes(features, labels, classes_to_drop):
     """

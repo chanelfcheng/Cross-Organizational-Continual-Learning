@@ -8,6 +8,6 @@ python continual.py \
 --exp-name $(basename ${0%".sh"}) \
 --dataset-names "cic-2018,usb-2021" \
 --dataset-paths "../data/CIC-IDS2018/DoS+BruteForce,../data/USB-IDS2021" \
---dataset-classes "benign,ftp,ssh,hulk,slowloris,slowhttp,goldeneye,tcpflood" \
---rename-labels "Benign,Malicious,Malicious,Malicious,Malicious,Malicious,Malicious,Malicious" \
+--dataset-classes "benign,hulk,slowloris,slowhttp,goldeneye,tcpflood,ftp,ssh" \
+--rename-labels "Benign,Attack,Attack,Attack,Attack,Attack,Attack,Attack" \
 --arch "mlp"

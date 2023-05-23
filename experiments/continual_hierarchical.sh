@@ -10,6 +10,6 @@ python continual_hierarchical.py \
 --dataset-paths "../data/CIC-IDS2018/DoS+BruteForce,../data/USB-IDS2021" \
 --dataset-classes "benign,hulk,slowloris,slowhttp,goldeneye,tcpflood,ftp,ssh" \
 --rename-binary "Benign,Attack,Attack,Attack,Attack,Attack,Attack,Attack" \
---rename-super "Benign,DoS,DoS,DoS,DoS,DoS,BruteForce,BruteForce" \
---rename-sub "Benign,DoS-Hulk,DoS-Slowloris,DoS-SlowHttpTest,DoS-GoldenEye,DoS-TCPFlood,BruteForce-FTP,BruteForce-SSH" \
+--rename-super ",DoS,DoS,DoS,DoS,DoS,BruteForce,BruteForce" \
+--rename-sub ",DoS-Hulk,DoS-Slowloris,DoS-SlowHttpTest,DoS-GoldenEye,DoS-TCPFlood,BruteForce-FTP,BruteForce-SSH" \
 --arch "mlp"

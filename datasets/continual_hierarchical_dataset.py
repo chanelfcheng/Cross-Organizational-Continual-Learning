@@ -12,7 +12,7 @@ from torch.utils.data import TensorDataset, DataLoader
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import RobustScaler
 
-from utils.preprocessing import process_features, remove_invalid_v2, resample_data
+from utils.preprocessing import process_features_v2, remove_invalid_v2, resample_data_v2
 from utils import create_if_not_exists
 
 PKL_PATH = './pickle/'
@@ -36,13 +36,15 @@ class ContinualHierarchicalDataset:
 
         self.binary = list(dict.fromkeys(self.rename_binary))
 
-        self.super = list(dict.fromkeys(self.rename_super))
-        self.num_super = len(self.super)-1 # All unique labels except benign
+        self.super_all = list(dict.fromkeys(self.rename_super))
+        self.super = [label for label in self.super_all if label]   # Exclude empty string
 
-        self.sub = list(dict.fromkeys(self.rename_sub))
-        self.num_sub = []
+        self.sub_all = list(dict.fromkeys(self.rename_sub))
+        self.sub = []
         for superlabel in self.super:
-            self.num_sub += [len([label for label in self.sub if superlabel in label])]
+            self.sub += [label for label in self.sub_all if superlabel in label]
+
+        self.num_classes = len(self.sub_all)
         self.args = args
 
         self.train_over, self.test_over = False, False
@@ -53,26 +55,33 @@ class ContinualHierarchicalDataset:
         self.completed_rounds, self.train_iteration, self.test_class, self.test_iteration = 0, 0, 0, 0
 
         # Get label mapping
-        self.label_mapping = {}
-        for i in range(self.num_classes):
-            self.label_mapping[self.classes[i]] = i
+        self.binary_mapping = {}
+        for i in range(2):
+            self.binary_mapping[self.binary[i]] = i
+
+        self.super_mapping = {}
+        for i in range(len(self.super_all)):
+            self.super_mapping[self.super_all[i]] = i
+        
+        self.sub_mapping = {}
+        for i in range(len(self.sub_all)):
+            self.sub_mapping[self.sub_all[i]] = i
         
         # Load the data
-        self.features_train, self.features_test, self.labels_train, self.labels_test = self.__load_data(self.dataset_names[0] + '_' + self.args.exp_name, self.dataset_paths[0], self.args.categorical)
+        self.train_set, self.test_set = self.__load_data(self.dataset_names[0] + '_' + self.args.exp_name, self.dataset_paths[0], self.args.categorical)
         if len(self.dataset_names) > 1:
             for i in range(1, len(self.dataset_names)):
-                features_train, features_test, labels_train, labels_test = self.__load_data(self.dataset_names[i] + '_' + self.args.exp_name, self.dataset_paths[i], self.args.categorical)
-                self.features_train = np.concatenate([self.features_train, features_train])
-                self.features_test = np.concatenate([self.features_test, features_test])
-                self.labels_train = np.concatenate([self.labels_train, labels_train]).tolist()
-                self.labels_test = np.concatenate([self.labels_test, labels_test]).tolist()
+                train_set, test_set = self.__load_data(self.dataset_names[i] + '_' + self.args.exp_name, self.dataset_paths[i], self.args.categorical)
+                # concatenate the train_set and test_set
+                self.train_set = pd.concat([self.train_set, train_set])
+                self.test_set = pd.concat([self.test_set, test_set])
 
         # Resample training data
         print('\nResampling training data...')
-        self.features_train, self.labels_train = resample_data(self.args.exp_name, self.features_train, self.labels_train)
+        self.train_set = resample_data_v2(self.args.exp_name, self.train_set, -1)
 
         # Get train and test datasets
-        self.train_dataset, self.test_dataset = self.get_pytorch_datasets(self.args.arch) 
+        self.train_dataset, self.test_dataset = self.get_pytorch_datasets(self.args.arch)
 
         # Initialize the data loaders
         self.init_data_loaders()
@@ -210,9 +219,19 @@ class ContinualHierarchicalDataset:
     def get_pytorch_datasets(self, arch='mlp'):
         # print('Getting pytorch datasets...')
         # Fit scaler to train features and scale the train and test features
-        scale = RobustScaler(quantile_range=(5,95)).fit(self.features_train)
-        features_train = scale.transform(self.features_train)
-        features_test = scale.transform(self.features_test)
+        features_train = self.train_set.drop(['Label0', 'Label1', 'Label2'], axis=1)
+        features_test = self.test_set.drop(['Label0', 'Label1', 'Label2'], axis=1)
+
+        labels_train = self.train_set['Label0']
+        labels_train['Label1'] = self.train_set['Label1']
+        labels_train['Label2'] = self.train_set['Label2']
+        labels_test = self.test_set['Label0']
+        labels_test['Label1'] = self.test_set['Label1']
+        labels_test['Label2'] = self.test_set['Label2']
+
+        scale = RobustScaler(quantile_range=(5,95)).fit(features_train)
+        features_train = scale.transform(features_train)
+        features_test = scale.transform(features_test)
 
         # Create pytorch tensors containing features only
         features_train = torch.tensor(features_train)
@@ -225,13 +244,29 @@ class ContinualHierarchicalDataset:
             features_train.shape, features_test.shape
 
         # Label encoding
-        le_train = []
-        for label in self.labels_train:
-            le_train.append(self.label_mapping[label])
-        
-        le_test = []
-        for label in self.labels_test:
-            le_test.append(self.label_mapping[label])
+        le_train = np.array([])
+        for i in range(len(labels_train)):
+            binary_label = labels_train.iloc[i]['Label0']
+            super_label = labels_train.iloc[i]['Label1']
+            sub_label = labels_train.iloc[i]['Label2']
+
+            if le_train.size == 0:
+                le_train = np.array([self.binary_mapping[binary_label], self.super_mapping[super_label], self.sub_mapping[sub_label]])
+            else:
+                tmp = np.array([self.binary_mapping[binary_label], self.super_mapping[super_label], self.sub_mapping[sub_label]])
+                le_train = np.vstack((le_train, tmp))
+
+        le_test = np.array([])
+        for i in range(len(labels_test)):
+            binary_label = labels_test.iloc[i]['Label0']
+            super_label = labels_test.iloc[i]['Label1']
+            sub_label = labels_test.iloc[i]['Label2']
+
+            if le_test.size == 0:
+                le_test = np.array([self.binary_mapping[binary_label], self.super_mapping[super_label], self.sub_mapping[sub_label]])
+            else:
+                tmp = np.array([self.binary_mapping[binary_label], self.super_mapping[super_label], self.sub_mapping[sub_label]])
+                le_test = np.vstack((le_test, tmp))
 
         # Create pytorch tensors containing labels only
         labels_train = torch.tensor(le_train)
@@ -242,8 +277,13 @@ class ContinualHierarchicalDataset:
         test_dataset = TensorDataset(features_test, labels_test)
 
         # Define dataset classes
-        train_dataset.classes = self.classes
-        test_dataset.classes = self.classes
+        train_dataset.binary = self.binary
+        train_dataset.super = self.super
+        train_dataset.sub = self.sub
+
+        test_dataset.binary = self.binary
+        test_dataset.super = self.super
+        test_dataset.sub = self.sub
 
         return train_dataset, test_dataset
 
@@ -255,11 +295,13 @@ class ContinualHierarchicalDataset:
         df = df.loc[df['Label'].str.contains('|'.join(self.dataset_classes), case=False)].copy()
 
         for i in range(len(self.dataset_classes)):
-            if df['Label'].str.contains(self.dataset_classes[i], case=False):
-                df['Label0'] = self.rename_binary[i]
-                df['Label1'] = self.rename_super[i]
-                df['Label2'] = self.rename_sub[i]
-        
+            df.loc[df['Label'].str.contains(self.dataset_classes[i], case=False), 'Label0'] = self.rename_binary[i]
+            df.loc[df['Label'].str.contains(self.dataset_classes[i], case=False), 'Label1'] = self.rename_super[i]
+            df.loc[df['Label'].str.contains(self.dataset_classes[i], case=False), 'Label2'] = self.rename_sub[i]
+    
+        # drop original label column
+        df = df.drop(['Label'], axis=1)
+
         return df
 
     # TODO: fix this to work with hierarchical labels
@@ -276,13 +318,13 @@ class ContinualHierarchicalDataset:
         """
         # Define variables to store all features, labels, and invalid count after concatenation
         all_features = np.array([])
-        all_labels = []
+        all_labels = np.array([])
         all_invalid = 0
 
         # Check if pre-processed pickle file exists
         if os.path.exists(os.path.join(PKL_PATH, f'{dset}.pkl')): 
             with open(os.path.join(PKL_PATH, f'{dset}.pkl'), 'rb') as file:
-                features_train, features_test, labels_train, labels_test = pickle.load(file)  # Load data from pickle file
+                train_set, test_set = pickle.load(file)  # Load data from pickle file
         else:
             for file in list(glob.glob(os.path.join(f'{data_path}', '*.csv'))):
                 print('\nLoading', file, '...')
@@ -293,38 +335,34 @@ class ContinualHierarchicalDataset:
                     df = self.__map_labels(df)
 
                     # Process the features and labels
-                    features, labels = process_features(dset, df.sample(frac=0.1), include_categorical)
+                    df = process_features_v2(dset, df.sample(frac=0.1), include_categorical)
+
+                    # Get features
+                    features = df.drop(['Label0', 'Label1', 'Label2'], axis=1)
 
                     # Get hierarchical labels
-                    binary_labels = df['Label0']
-                    super_labels = df['Label1']
-                    sub_labels = df['Label2']
+                    labels = df[['Label0', 'Label1', 'Label2']]
 
-                    # Convert dataframe to numpy array for processing
-                    data_np = np.array(features.to_numpy(), dtype=np.float32)
-                    binary_lst = binary_labels.to_list()
-                    super_lst = super_labels.to_list()
-                    sub_lst = sub_labels.to_list()
+                    # Convert dataframes to numpy arrays for processing
+                    features_np = np.array(features.to_numpy(), dtype=np.float32)
+                    labels_np = np.array(labels.to_numpy(), dtype=str)
 
-                    data_np, remove_idx = remove_invalid_v2(data_np)  # Clean data of invalid values
-                    binary_lst = np.delete(binary_lst, remove_idx).tolist()
-                    super_lst = np.delete(super_lst, remove_idx).tolist()
-                    sub_lst = np.delete(sub_lst, remove_idx).tolist()
+                    features_np, remove_idx = remove_invalid_v2(features_np)  # Clean data of invalid values
+                    labels_np = np.delete(labels_np, remove_idx, axis=0)
 
                     # Combine all data, labels, and number of invalid values
                     if all_features.size == 0:
-                        all_features = data_np  # If no data yet, set all data to current data
+                        all_features = features_np  # If no data yet, set all data to current data
+                        all_labels = labels_np
                     else:
-                        all_features = np.concatenate((all_features, data_np))  # Else, concatenate data
-                    all_binary += binary_lst
-                    all_super += super_lst
-                    all_sub += sub_lst
+                        all_features = np.concatenate((all_features, features_np))  # Else, concatenate data
+                        all_labels = np.concatenate((all_labels, labels_np))
                     all_invalid += len(remove_idx)
 
             # Print total number of invalid values dropped, total number of data
             # values, and total percentage of invalid data
             print('\nTotal Number of invalid values: %d' % all_invalid)
-            print('Total Data values: %d' % len(all_binary))
+            print('Total Data values: %d' % len(all_labels))
             print('Invalid data: %.2f%%' % (all_invalid / float(all_features.size) * 100))
 
             # Save histogram of cleaned data
@@ -332,29 +370,27 @@ class ContinualHierarchicalDataset:
             plt.tight_layout()
             plt.savefig(os.path.join('./out/', f'hist_{dset}.png'))
 
-            # Create new dataframe by concatenating all_features with
-            # all_binary, all_super, and all_sub
-            hierarchical_df = pd.DataFrame(all_features, columns=features.columns.values.tolist())
-            hierarchical_df['Label0'] = all_binary
-            hierarchical_df['Label1'] = all_super
-            hierarchical_df['Label2'] = all_sub
+            # Create new dataframe by concatenating all_features with all_labels
+            features_df = pd.DataFrame(all_features, columns=features.columns.values.tolist())
+            labels_df = pd.DataFrame(all_labels, columns=labels.columns.values.tolist())
+            all_df = pd.concat([features_df, labels_df], axis=1)
 
             # Perform train/test split of 80-20
-            train_set, test_set = train_test_split(hierarchical_df, test_size=0.2)
+            train_set, test_set = train_test_split(all_df, test_size=0.2)
             
-            # Convert hiearchical_df to numpy by separating into features and
-            # labels
-            features_train = train_set.drop(['Label0', 'Label1', 'Label2'], axis=1)
-            features_train = np.array(features_train.to_numpy(), dtype=np.float32)
-            binary_train = train_set['Label0'].values.tolist()
-            super_train = train_set['Label1'].values.tolist()
-            sub_train = train_set['Label2'].values.tolist()
+            # # Convert hiearchical_df to numpy by separating into features and
+            # # labels
+            # features_train = train_set.drop(['Label0', 'Label1', 'Label2'], axis=1)
+            # features_train = np.array(features_train.to_numpy(), dtype=np.float32)
+            # binary_train = train_set['Label0'].values.tolist()
+            # super_train = train_set['Label1'].values.tolist()
+            # sub_train = train_set['Label2'].values.tolist()
 
-            features_test = test_set.drop(['Label0', 'Label1', 'Label2'], axis=1)
-            features_test = np.array(features_test.to_numpy(), dtype=np.float32)
-            binary_test = test_set['Label0'].values.tolist()
-            super_test = test_set['Label1'].values.tolist()
-            sub_test = test_set['Label2'].values.tolist()
+            # features_test = test_set.drop(['Label0', 'Label1', 'Label2'], axis=1)
+            # features_test = np.array(features_test.to_numpy(), dtype=np.float32)
+            # binary_test = test_set['Label0'].values.tolist()
+            # super_test = test_set['Label1'].values.tolist()
+            # sub_test = test_set['Label2'].values.tolist()
 
             # # Resample training data
             # print('\nResampling training data...')
@@ -362,6 +398,8 @@ class ContinualHierarchicalDataset:
             
             # Save to pickle file
             with open(os.path.join(PKL_PATH, f'{dset}.pkl'), 'wb') as file:
-                pickle.dump((features_train, features_test, binary_train, binary_test, super_train, super_test, sub_train, sub_test), file)
+                pickle.dump((train_set, test_set), file)
+
+        # ret_tuple = features_train, features_test, binary_train, binary_test, super_train, super_test, sub_train, sub_test
             
-        return features_train, features_test, binary_train, binary_test, super_train, super_test, sub_train, sub_test
+        return train_set, test_set

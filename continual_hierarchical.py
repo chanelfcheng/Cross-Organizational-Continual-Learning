@@ -9,10 +9,10 @@ from architectures import ARCHITECTURES
 from architectures.mlp import MLP
 from architectures.vae import VAE
 from datasets import get_support
-from datasets.continual_dataset import ContinualDataset
+from datasets.continual_hierarchical_dataset import ContinualHierarchicalDataset
 from utils.focal_loss import FocalLoss
 from utils import create_if_not_exists
-from models.continual_hierarchical_model import train, eval_last, \
+from models.continual_hierarchical_model import train, eval_check, \
     Er, Der
 
 """
@@ -29,7 +29,7 @@ def run_continual_hierarchical(args):
     dataset_names = args.dataset_names.split(',')
     dataset_classes = args.dataset_classes.split(',')
     
-    dataset = ContinualDataset(args)
+    dataset = ContinualHierarchicalDataset(args)
     print('\nContinual dataset:', dataset_names)
     print('Classes:', dataset_classes)
 
@@ -95,7 +95,9 @@ def main():
     parser.add_argument('--dataset-names', type=str, default='cic-2018,usb-2021', help='Names of the dataset to include in the experiment')
     parser.add_argument('--dataset-paths', type=str, default='../data/CIC-IDS2018,../data/USB-IDS2021', help='Paths of the dataset to include in the experiment')
     parser.add_argument('--dataset-classes', type=str, default='benign,hulk,slowloris,slowhttp,goldeneye,tcpflood', help='Classes from the dataset to include in the experiment')
-    parser.add_argument('--rename-labels', type=str, default='Benign,DoS-Hulk,DoS-Slowloris,DoS-SlowHttpTest,DoS-GoldenEye,DoS-TCPFlood', help='Labels to which to rename the classes')
+    parser.add_argument('--rename-binary', type=str, default='Benign,DoS-Hulk,DoS-Slowloris,DoS-SlowHttpTest,DoS-GoldenEye,DoS-TCPFlood', help='Labels to which to rename the binary classes')
+    parser.add_argument('--rename-super', type=str, default='Benign,DoS-Hulk,DoS-Slowloris,DoS-SlowHttpTest,DoS-GoldenEye,DoS-TCPFlood', help='Labels to which to rename the super classes')
+    parser.add_argument('--rename-sub', type=str, default='Benign,DoS-Hulk,DoS-Slowloris,DoS-SlowHttpTest,DoS-GoldenEye,DoS-TCPFlood', help='Labels to which to rename the sub classes')
     parser.add_argument('--arch', type=str, default='mlp', choices=ARCHITECTURES, help='The model architecture')
 
     # Experiment parameters
@@ -123,7 +125,7 @@ def main():
         train(hierarchical_model, dataset, out_path, counter, args)
     if user_in == 'eval':
         counter -= 1
-        eval_last(hierarchical_model, dataset, out_path, counter)
+        eval_check(hierarchical_model, dataset, out_path, counter)
 
 if __name__ == '__main__':
     main()

@@ -142,20 +142,20 @@ class Ddm():
         return loss.item()
         
 
-def train(model, dataset, out_path, counter, args):
+def train(hierarchical_model, dataset, out_path, counter, args):
     init_log(out_path, counter, args)
 
     print('\nTraining phase')
     print('Current malicious class:',  list(dataset.label_mapping.keys())[dataset.train_classes[1]])
-    model[0].net.to(model.device)
-    model[1].net.to(model.device)
+    hierarchical_model[0].net.to(hierarchical_model[0].device)
+    hierarchical_model[1].net.to(hierarchical_model[1].device)
     for i in range(dataset.num_sub):
-        model[2][i].net.to(model.device)
+        hierarchical_model[2][i].net.to(hierarchical_model[2][i].device)
 
-    model[0].net.train()
-    model[1].net.train()
+    hierarchical_model[0].net.train()
+    hierarchical_model[1].net.train()
     for i in range(dataset.num_sub):
-        model[2][i].net.train()
+        hierarchical_model[2][i].net.train()
 
     i = 0
     start = time.time()
@@ -164,12 +164,7 @@ def train(model, dataset, out_path, counter, args):
             max_progress = sum(dataset.active_remaining_training_items) // args.batch_size
         
         if not (i + 1) % (max_progress + 1):
-            eval_check(model[0], dataset, out_path, counter, target_col=-3)
-            eval_check(model[1], dataset, out_path, counter, target_col=-2)
-            for i in range(dataset.num_sub):
-                eval_check(model[2][i], dataset, out_path, counter, target_col=-1)
-
-            
+            eval_check(hierarchical_model, dataset, out_path, counter)
 
             # for key in model.buffer.buffer_content:
             #     model.buffer.buffer_content[key] = (model.buffer.buffer_content[key] // (model.buffer.batch_count)) / args.batch_size
@@ -190,9 +185,10 @@ def train(model, dataset, out_path, counter, args):
             i += 1
         
         inputs, labels = dataset.get_train_data()   # TODO: fix this to get the hierarchical labels
+        print("train:", inputs.shape, labels.shape)
 
-        inputs, labels = inputs.to(model.device), labels.to(model.device)
-        loss = model.observe(inputs.float(), labels, drift=None)
+        inputs, labels = inputs.to(hierarchical_model.device), labels.to(hierarchical_model.device)
+        loss = hierarchical_model.observe(inputs.float(), labels, drift=None)
 
         progress_bar(i, max_progress, dataset.completed_rounds + 1, 'C', loss)
     
@@ -202,81 +198,53 @@ def train(model, dataset, out_path, counter, args):
     with open(os.path.join(out_path, f'log_{counter}.txt'), 'a') as file:
         file.write(f'\nTraining complete in {timedelta(seconds=round(time_elapsed))}\n')
 
-    torch.save(model[0].state_dict(), os.path.join(out_path, f'binary_model_{counter}.pt'))
-    torch.save(model[1].state_dict(), os.path.join(out_path, f'super_model_{counter}.pt'))
-    for i in range(dataset.num_sub):
-        torch.save(model[2][i].state_dict(), os.path.join(out_path, f'sub_model_{i}_{counter}.pt'))
+    torch.save(hierarchical_model[0].state_dict(), os.path.join(out_path, f'binary_model_{counter}.pt'))
+    torch.save(hierarchical_model[1].state_dict(), os.path.join(out_path, f'super_model_{counter}.pt'))
+    for i in range(len(hierarchical_model[2])):
+        torch.save(hierarchical_model[2][i].state_dict(), os.path.join(out_path, f'sub_model_{i}_{counter}.pt'))
 
-    eval_last(model, dataset, out_path, counter)
+    eval_check(hierarchical_model, dataset, out_path, counter)
 
-def eval_last(model, dataset, out_path, counter):
-    binary_model = model[0].load_state_dict(torch.load(os.path.join(out_path, f'binary_model_{counter}.pt')))
-    super_model = model[1].load_state_dict(torch.load(os.path.join(out_path, f'super_model_{counter}.pt')))
-    sub_models = []
-    for i in range(dataset.num_sub):
-        sub_models += [model[2][i].load_state_dict(torch.load(os.path.join(out_path, f'sub_model_{i}_{counter}.pt')))]
-        
-    all_labels, all_preds, _ = eval_check(binary_model, dataset, out_path, counter, save_embedding=True, target_col=-3)
-    save_confusion_matrix(all_labels, all_preds, dataset.classes, out_path, counter)
-
-    all_labels, all_preds, _ = eval_check(super_model, dataset, out_path, counter, save_embedding=True, target_col=-2)
-    save_confusion_matrix(all_labels, all_preds, dataset.super_classes, out_path, counter)
-
-    for i in range(dataset.num_sub):
-        all_labels, all_preds, _ = eval_check(sub_models[i], dataset, out_path, counter, save_embedding=True, target_col=-1)
-        save_confusion_matrix(all_labels, all_preds, dataset.sub_classes[i], out_path, counter)
-
-def eval_check(model, dataset, out_path, counter, save_embedding=False, target_col=-1):
+def eval_check(hierarchical_model, dataset, classes, out_path, counter, save_embedding=False, target_col=-1):
     print('\nEvaluation phase')
-    model.net.to(model.device)
+    hierarchical_model[0].net.to(hierarchical_model[0].device)
+    hierarchical_model[1].net.to(hierarchical_model[1].device)
+    for i in range(dataset.num_sub):
+        hierarchical_model[2][i].net.to(hierarchical_model[2][i].device)
 
-    model.eval()
+    hierarchical_model[0].net.eval()
+    hierarchical_model[1].net.eval()
+    for i in range(dataset.num_sub):
+        hierarchical_model[2][i].net.eval()
+
     dataset.test_over = False
     dataset.test_class = 0
     start_test = True
     
     while not dataset.test_over:
-        inputs, labels = dataset.get_test_data()
-        inputs, labels = inputs.to(model.device), labels.to(model.device)
-        outputs, embeddings = model.net(inputs.float(), return_embedding=True)
+        inputs, labels = dataset.get_test_data()    # TODO: fix this to get the hierarchical labels
+        print("test:", inputs.shape, labels.shape)
+        inputs, labels = inputs.to(hierarchical_model.device), labels.to(hierarchical_model.device)
+        outputs = hierarchical_model.net(inputs.float(), return_embedding=False)
 
         _, preds = torch.max(outputs.data, 1)
 
         if start_test:
             all_preds = preds.float().cpu()
             all_labels = labels.float()
-            all_embeddings = embeddings.float().cpu()
             start_test = False
         else:
             all_preds = torch.cat((all_preds, preds.float().cpu()), 0)
             all_labels = torch.cat((all_labels, labels.float()), 0)
-            all_embeddings = torch.cat((all_embeddings, embeddings.float().cpu()), 0)
     
     all_labels = all_labels.detach().cpu().numpy()
     all_preds = all_preds.detach().cpu().numpy()
     all_embeddings = all_embeddings.detach().cpu().numpy()
 
-
-    report = classification_report(all_labels, all_preds, target_names=dataset.classes, digits=4)
+    report = classification_report(all_labels, all_preds, target_names=classes, digits=4)
     print(report)
 
     log_results(report, out_path, counter)
-
-    if save_embedding:
-        tsne = TSNE(2)
-        rand_idx = np.random.randint(len(all_embeddings), size=1000)
-        tsne_proj = tsne.fit_transform(all_embeddings[rand_idx,:])
-
-        plt.clf()
-        fig, ax = plt.subplots(figsize=(8, 8))
-        for i in range(dataset.num_classes):
-            indices = all_labels[rand_idx] == i
-            ax.scatter(tsne_proj[indices, 0], tsne_proj[indices, 1], label=dataset.classes[i],
-                       alpha=0.5)
-        ax.legend(fontsize='large', markerscale=2)
-        plt.title('t-SNE embeddings')
-        plt.savefig(os.path.join(out_path, f'embeddings_{counter}.png'))
-        plt.close('all')
     
     return all_labels, all_preds, all_embeddings
 
