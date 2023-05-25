@@ -8,12 +8,12 @@ import torch
 from architectures import ARCHITECTURES
 from architectures.mlp import MLP
 from architectures.vae import VAE
-from datasets import get_support
+from datasets import get_class_weights
 from datasets.continual_hierarchical_dataset import ContinualHierarchicalDataset
 from utils.focal_loss import FocalLoss
 from utils import create_if_not_exists
 from models.continual_hierarchical_model import train, eval_check, \
-    Er, Der
+    Er
 
 """
 usage: continual.py [-h] 
@@ -36,46 +36,41 @@ def run_continual_hierarchical(args):
     device = torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')
     print(device)
 
-    # Get class weights
-    train_support = get_support(dataset.train_dataset)
-    train_support = dict(sorted(train_support.items()))
-    weights = 1 / np.array( list( train_support.values() ) )
-    weights = weights / np.sum(weights) * dataset.num_classes
-    weights = torch.Tensor(weights).to(device)
-
     # Initialize model for intrusion detection
     binary_arch = MLP(88 if args.categorical else 76, 2)
     super_arch = MLP(88 if args.categorical else 76, dataset.num_super)
     sub_archs = []
-    for i in range(dataset.num_sub):
+    for i in range(len(dataset.sub)):
         sub_archs += [MLP(88 if args.categorical else 76, dataset.num_sub[i])]
+    archs = [binary_arch, super_arch, sub_archs]
 
-    binary_criterion = FocalLoss(beta=weights, gamma=args.gamma)
-    super_criterion = FocalLoss(beta=weights, gamma=args.gamma)
+    # TODO: fix weights to match number of classes for binary (2), super (2),
+    # and sub (5, 2)
+
+    # Get class weights
+    binary_weights = get_class_weights(dataset, device, target_col=-3)
+    super_weights = get_class_weights(dataset, device, target_col=-2)
+    sub_weights = []
+    for i in range(len(dataset.sub)):
+        sub_weights += [get_class_weights(dataset, device, target_col=-1)]
+
+    # Define loss criterions
+    binary_criterion = FocalLoss(beta=binary_weights, gamma=args.gamma)
+    super_criterion = FocalLoss(beta=super_weights, gamma=args.gamma)
     sub_criterions = []
-    for i in range(dataset.num_sub):
-        sub_criterions += [FocalLoss(beta=weights, gamma=args.gamma)]
+    for i in range(len(dataset.sub)):
+        sub_criterions += [FocalLoss(beta=sub_weights[i], gamma=args.gamma)]
+    criterions = [binary_criterion, super_criterion, sub_criterions]
     
+    # Define optimizers
     binary_optimizer = optim.RAdam(binary_arch.parameters(), lr=args.lr)
     super_optimizer = optim.RAdam(super_arch.parameters(), lr=args.lr)
     sub_optimizers = []
-    for i in range(dataset.num_sub):
+    for i in range(len(dataset.sub)):
         sub_optimizers += [optim.RAdam(sub_archs[i].parameters(), lr=args.lr)]
+    optimizers = [binary_optimizer, super_optimizer, sub_optimizers]
 
-    if args.alpha > 0:
-        binary_model = Der(binary_arch, binary_criterion, binary_optimizer, args)
-        super_model = Der(super_arch, super_criterion, super_optimizer, args)
-        sub_models = []
-        for i in range(dataset.num_sub):
-            sub_models += [Der(sub_archs[i], sub_criterions[i], sub_optimizers[i], args)]
-    else:
-        binary_model = Er(binary_arch, binary_criterion, binary_optimizer, args)
-        super_model = Er(super_arch, super_criterion, super_optimizer, args)
-        sub_models = []
-        for i in range(dataset.num_sub):
-            sub_models += [Er(sub_archs[i], sub_criterions[i], sub_optimizers[i], args)]
-        # for key in range(dataset.num_classes):
-        #     model.buffer.buffer_content[key] = 0
+    hierarchical_model = Er(archs, criterions, optimizers, args)
 
     out_path = os.path.join('./out/', args.exp_name)
     create_if_not_exists(out_path)
@@ -83,8 +78,6 @@ def run_continual_hierarchical(args):
     counter = 0
     while os.path.exists(os.path.join(out_path, f'model_{counter}.pt')):
         counter += 1
-
-    hierarchical_model = [binary_model, super_model, sub_models]
 
     return hierarchical_model, dataset, out_path, counter
 
@@ -109,7 +102,7 @@ def main():
     parser.add_argument('--buffer-size', type=int, default=1000, help='Maximum number of samples the buffer can hold')
     parser.add_argument('--buffer-strategy', type=str, default='uncertainty', help='Strategy to use for sampling to the buffer')
     parser.add_argument('--alpha', type=float, default=-1, help='Balance parameter for balancing trade-off between past and current samples')
-    parser.add_argument('--gamma', type=float, default=3, help='Focus parameter for focal loss')
+    parser.add_argument('--gamma', type=float, default=2, help='Focus parameter for focal loss')
     parser.add_argument('--sampling-threshold', type=float, default=0.85, help='Probability threshold for sampling to the buffer')
     parser.add_argument('--lr', type=float, default=1e-4, help='Learning rate during training')
 

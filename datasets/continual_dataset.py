@@ -110,8 +110,9 @@ class ContinualDataset:
             masked_dataset = TensorDataset(
                     self.test_dataset.tensors[0][mask], 
                     self.test_dataset.tensors[1][mask])
-            self.test_loaders.append(DataLoader(masked_dataset,
-                            batch_size=self.args.batch_size, shuffle=True))
+            if len(masked_dataset) != 0:
+                self.test_loaders.append(DataLoader(masked_dataset,
+                    batch_size=self.args.batch_size, shuffle=True))
 
     def train_next_class(self):
         """

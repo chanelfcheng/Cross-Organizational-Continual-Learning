@@ -222,7 +222,6 @@ def remove_invalid_v2(features_np):
 
     return features_np, remove_idx
 
-# TODO: Fix ValueError: Input y contains NaN in fit_resample
 def resample_data(dset, features, labels):
     """
     Resamples the data to reduce class imbalance. The largest class is randomly undersampled to 2x greater than the
@@ -322,8 +321,8 @@ def resample_data_v2(dset, df, target_col=-1):
     :param labels: The column containing the labels
     :return: the resampled features and their corresponding labels
     """
-    features = df.iloc[:, :-1].to_numpy()
-    labels = df.iloc[:, target_col].values.tolist()
+    features = df.drop(df.columns[target_col], axis=1)
+    labels = df[df.columns[target_col]]
 
     class_samples = {}
     orig_samples = len(labels)
@@ -402,8 +401,8 @@ def resample_data_v2(dset, df, target_col=-1):
     print('Original samples: %d' % orig_samples)
     print('Current samples: %d' % len(labels))
 
-    resampled_df = pd.DataFrame(features)
-    resampled_df[target_col] = labels
+    resampled_df = pd.concat([pd.DataFrame(features), pd.DataFrame(labels)], axis=1)
+    resampled_df.columns = df.columns
 
     return resampled_df
 

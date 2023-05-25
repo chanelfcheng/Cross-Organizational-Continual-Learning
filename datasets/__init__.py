@@ -21,3 +21,22 @@ def get_support(dataset):
             support[label] += 1
 
     return support
+
+def get_support_v2(dataset, target_col=-1):
+    support = {}
+    for label in np.array(dataset.tensors[1][:, target_col]):
+        if label not in support:
+            support[label] = 1
+        else:
+            support[label] += 1
+
+    return support
+
+def get_class_weights(dataset, device, target_col=-1):
+    train_support = get_support_v2(dataset.train_dataset, target_col=target_col)
+    train_support = dict(sorted(train_support.items()))
+    weights = 1 / np.array( list( train_support.values() ) )
+    weights = weights / np.sum(weights) * dataset.num_classes
+    weights = torch.Tensor(weights).to(device)
+
+    return weights

@@ -38,11 +38,15 @@ class ContinualHierarchicalDataset:
 
         self.super_all = list(dict.fromkeys(self.rename_super))
         self.super = [label for label in self.super_all if label]   # Exclude empty string
+        self.num_super = len(self.super)
 
         self.sub_all = list(dict.fromkeys(self.rename_sub))
         self.sub = []
+        self.num_sub = []
         for superlabel in self.super:
-            self.sub += [label for label in self.sub_all if superlabel in label]
+            sub = [label for label in self.sub_all if superlabel in label]
+            self.sub += [sub]
+            self.num_sub += [len(sub)]
 
         self.num_classes = len(self.sub_all)
         self.args = args
@@ -72,18 +76,21 @@ class ContinualHierarchicalDataset:
         if len(self.dataset_names) > 1:
             for i in range(1, len(self.dataset_names)):
                 train_set, test_set = self.__load_data(self.dataset_names[i] + '_' + self.args.exp_name, self.dataset_paths[i], self.args.categorical)
+                train_set.columns = self.train_set.columns
+                test_set.columns = self.test_set.columns
                 # concatenate the train_set and test_set
-                self.train_set = pd.concat([self.train_set, train_set])
-                self.test_set = pd.concat([self.test_set, test_set])
-
+                self.train_set = pd.concat([self.train_set, train_set], axis=0)
+                self.test_set = pd.concat([self.test_set, test_set], axis=0)
         # Resample training data
         print('\nResampling training data...')
         self.train_set = resample_data_v2(self.args.exp_name, self.train_set, -1)
 
         # Get train and test datasets
+        print('\nCreating datasets...')
         self.train_dataset, self.test_dataset = self.get_pytorch_datasets(self.args.arch)
 
         # Initialize the data loaders
+        print('\nInitializing data loaders...')
         self.init_data_loaders()
 
         # Set active data loaders
@@ -109,11 +116,13 @@ class ContinualHierarchicalDataset:
             for j in range(self.num_classes):
                 self.train_loaders.append([])
                 self.remaining_training_items.append([])
-                mask = np.isin(np.array(self.train_dataset.tensors[1]), [j])
+                mask = np.isin(np.array(self.train_dataset.tensors[1][:, -1]), [j])
                 samples_per_iteration = 10000
                 masked_dataset = TensorDataset(
                     self.train_dataset.tensors[0][mask][k * samples_per_iteration:(k+1) * samples_per_iteration], 
                     self.train_dataset.tensors[1][mask][k * samples_per_iteration:(k+1) * samples_per_iteration])
+                # print(masked_dataset.tensors[0][:10])
+                # print(masked_dataset.tensors[1][:10])
                 # print(masked_dataset.tensors[1][:10])
                 # print(masked_dataset.tensors[1].shape)
                 if len(masked_dataset) != 0:
@@ -124,12 +133,13 @@ class ContinualHierarchicalDataset:
         
         # Fill the test loaders
         for j in range(self.num_classes):
-            mask = np.isin(np.array(self.test_dataset.tensors[1]), [j])
+            mask = np.isin(np.array(self.test_dataset.tensors[1][:, -1]), [j])
             masked_dataset = TensorDataset(
                     self.test_dataset.tensors[0][mask], 
                     self.test_dataset.tensors[1][mask])
-            self.test_loaders.append(DataLoader(masked_dataset,
-                            batch_size=self.args.batch_size, shuffle=True))
+            if len(masked_dataset) != 0:
+                self.test_loaders.append(DataLoader(masked_dataset,
+                    batch_size=self.args.batch_size, shuffle=True))
 
     def train_next_class(self):
         """
@@ -143,7 +153,7 @@ class ContinualHierarchicalDataset:
             if self.completed_rounds == self.args.num_rounds:
                 self.train_over = True
                 
-        print('\nCurrent malicious class:', list(self.label_mapping.keys())[self.train_classes[1]%self.num_classes])
+        print('\nCurrent malicious class:', list(self.sub_mapping.keys())[self.train_classes[1]%self.num_classes])
 
         # if self.train_classes[1] == 1:
         #     self.completed_rounds += 1
@@ -211,7 +221,7 @@ class ContinualHierarchicalDataset:
             self.test_iteration = 0
             self.test_class += 1
 
-            if self.test_class == self.num_classes:
+            if self.test_class == len(self.test_loaders):
                 self.test_over = True
 
         return x_test, y_test
@@ -222,12 +232,8 @@ class ContinualHierarchicalDataset:
         features_train = self.train_set.drop(['Label0', 'Label1', 'Label2'], axis=1)
         features_test = self.test_set.drop(['Label0', 'Label1', 'Label2'], axis=1)
 
-        labels_train = self.train_set['Label0']
-        labels_train['Label1'] = self.train_set['Label1']
-        labels_train['Label2'] = self.train_set['Label2']
-        labels_test = self.test_set['Label0']
-        labels_test['Label1'] = self.test_set['Label1']
-        labels_test['Label2'] = self.test_set['Label2']
+        labels_train = self.train_set[['Label0', 'Label1', 'Label2']]
+        labels_test = self.test_set[['Label0', 'Label1', 'Label2']]
 
         scale = RobustScaler(quantile_range=(5,95)).fit(features_train)
         features_train = scale.transform(features_train)
@@ -244,29 +250,21 @@ class ContinualHierarchicalDataset:
             features_train.shape, features_test.shape
 
         # Label encoding
-        le_train = np.array([])
+        le_train = []
         for i in range(len(labels_train)):
-            binary_label = labels_train.iloc[i]['Label0']
-            super_label = labels_train.iloc[i]['Label1']
-            sub_label = labels_train.iloc[i]['Label2']
+            binary_label = labels_train.iat[i, -3]
+            super_label = labels_train.iat[i, -2]
+            sub_label = labels_train.iat[i, -1]
 
-            if le_train.size == 0:
-                le_train = np.array([self.binary_mapping[binary_label], self.super_mapping[super_label], self.sub_mapping[sub_label]])
-            else:
-                tmp = np.array([self.binary_mapping[binary_label], self.super_mapping[super_label], self.sub_mapping[sub_label]])
-                le_train = np.vstack((le_train, tmp))
+            le_train.append([self.binary_mapping[binary_label], self.super_mapping[super_label], self.sub_mapping[sub_label]])
 
-        le_test = np.array([])
+        le_test = []
         for i in range(len(labels_test)):
-            binary_label = labels_test.iloc[i]['Label0']
-            super_label = labels_test.iloc[i]['Label1']
-            sub_label = labels_test.iloc[i]['Label2']
+            binary_label = labels_train.iat[i, -3]
+            super_label = labels_train.iat[i, -2]
+            sub_label = labels_train.iat[i, -1]
 
-            if le_test.size == 0:
-                le_test = np.array([self.binary_mapping[binary_label], self.super_mapping[super_label], self.sub_mapping[sub_label]])
-            else:
-                tmp = np.array([self.binary_mapping[binary_label], self.super_mapping[super_label], self.sub_mapping[sub_label]])
-                le_test = np.vstack((le_test, tmp))
+            le_test.append([self.binary_mapping[binary_label], self.super_mapping[super_label], self.sub_mapping[sub_label]])
 
         # Create pytorch tensors containing labels only
         labels_train = torch.tensor(le_train)
